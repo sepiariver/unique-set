@@ -1,5 +1,8 @@
 # @sepiariver/unique-set
-Extends the add method on the native JavaScript Set object to compare using fast-deep-equal
+
+Extends the `add` method on the native JavaScript Set object to compare using [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal)
+
+The extended method iterates through the elements of the Set until equality is found. If no elements match, the entire Set would have been iterated to determine so. For a very large Set, there is probably a better way to achieve what you're trying to do, otherwise UniqueSet can be very convenient.
 
 ## Installation
 
@@ -33,14 +36,9 @@ const data = [
   [1, 2, 3],
 ];
 
-let common = new Set();
-data.forEach((el) => {
-  common.add(el);
-});
-console.log(common);
-
 let unique = new UniqueSet();
 data.forEach((el) => {
   unique.add(el);
 });
+console.log(unique.size); // 6 instead of 8 with Set
 ```
