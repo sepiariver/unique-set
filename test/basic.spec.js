@@ -40,7 +40,7 @@ describe("UniqueSet", () => {
     data.forEach((el) => {
       unique.add(el);
     });
-    expect(expected).toEqual(Array.from(unique));
+    expect(Array.from(unique)).toEqual(expected);
     expect(unique.size).toBe(6);
   });
 
@@ -67,5 +67,46 @@ describe("UniqueSet", () => {
     mySet1.delete(5); // removes 5 from the set
     expect(mySet1.has(5)).toBeFalsy();
     expect(mySet1.size).toBe(3);
+    mySet1.clear();
+    expect(mySet1.size).toBe(0);
+  });
+
+  it('works with the contructor', () => {
+    const data = [
+        "string",
+        "another string",
+        "string",
+        1,
+        2,
+        1,
+        {
+          foo: "bar",
+          bar: "baz",
+          baz: "lurman",
+        },
+        {
+          bar: "baz",
+          baz: "lurman",
+          foo: "bar",
+        },
+        [1, 2, 3],
+        [1, 2, 3],
+      ];
+  
+      const expected = [
+        "string",
+        "another string",
+        1,
+        2,
+        {
+          foo: "bar",
+          bar: "baz",
+          baz: "lurman",
+        },
+        [1, 2, 3],
+      ];
+      let unique = new UniqueSet(data);
+      expect(Array.from(unique)).toEqual(expected);
+      expect(unique.size).toBe(6);
   });
 });

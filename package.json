@@ -1,6 +1,6 @@
 {
   "name": "@sepiariver/unique-set",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Extends the add method on the native JavaScript Set object to compare using fast-deep-equal",
   "main": "index.js",
   "scripts": {

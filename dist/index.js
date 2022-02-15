@@ -46,14 +46,16 @@ var UniqueSet = /*#__PURE__*/function (_Set) {
   function UniqueSet() {
     _classCallCheck(this, UniqueSet);
 
-    return _super.call(this);
+    for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
+      args[_key] = arguments[_key];
+    }
+
+    return _super.call.apply(_super, [this].concat(args));
   }
 
   _createClass(UniqueSet, [{
-    key: "add",
-    value: function add(o) {
-      var isUnique = true;
-
+    key: "has",
+    value: function has(o) {
       var _iterator = _createForOfIteratorHelper(this),
           _step;
 
@@ -62,8 +64,7 @@ var UniqueSet = /*#__PURE__*/function (_Set) {
           var i = _step.value;
 
           if ((0, _fastDeepEqual["default"])(o, i)) {
-            isUnique = false;
-            break;
+            return true;
           }
         }
       } catch (err) {
@@ -72,7 +73,12 @@ var UniqueSet = /*#__PURE__*/function (_Set) {
         _iterator.f();
       }
 
-      if (isUnique) {
+      return false;
+    }
+  }, {
+    key: "add",
+    value: function add(o) {
+      if (!this.has(o)) {
         Set.prototype.add.call(this, o);
       }
     }

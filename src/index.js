@@ -1,19 +1,20 @@
 import equal from "fast-deep-equal";
 
 class UniqueSet extends Set {
-  constructor() {
-    super();
+  constructor(...args) {
+    super(...args);
   }
-  add(o) {
-    let isUnique = true;
+  has(o) {
     for (let i of this) {
       if (equal(o, i)) {
-        isUnique = false;
-        break;
+        return true;
       }
     }
-    if (isUnique) {
-      Set.prototype.add.call(this, o);
+    return false;
+  }
+  add(o) {
+    if (!this.has(o)) {
+        Set.prototype.add.call(this, o);
     }
   }
 }
