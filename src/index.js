@@ -5,7 +5,7 @@ class UniqueSet extends Set {
     super(...args);
   }
   has(o) {
-    for (let i of this) {
+    for (const i of this) {
       if (equal(o, i)) {
         return true;
       }
@@ -14,7 +14,7 @@ class UniqueSet extends Set {
   }
   add(o) {
     if (!this.has(o)) {
-        Set.prototype.add.call(this, o);
+      Set.prototype.add.call(this, o);
     }
   }
 }

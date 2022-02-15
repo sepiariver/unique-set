@@ -1,8 +1,10 @@
 # @sepiariver/unique-set
 
-Extends the `add` method on the native JavaScript Set object to compare using [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal)
+Extends the `has` and `add` methods on the native JavaScript `Set` object to use [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal) as the equality algorithm.
 
-The extended method iterates through the elements of the Set until equality is found. If no elements match, the entire Set would have been iterated to determine so. For a very large Set, there is probably a better way to achieve what you're trying to do, otherwise UniqueSet can be very convenient.
+The extended methods iterate through the elements of the `UniqueSet` until equality is found. If no elements match, the entire `UniqueSet` would have been iterated to determine so. However fast `fast-deep-equal` is, calling it in a loop like this makes performance many times poorer than the native `Set`. For datasets greater than a thousand elements, there is probably a better way to achieve what you're trying to do. Otherwise, `UniqueSet` is convenient.
+
+Requires @babel/core 7+
 
 ## Installation
 
@@ -10,7 +12,7 @@ The extended method iterates through the elements of the Set until equality is f
 npm install @sepiariver/unique-set
 ```
 
-### Usage
+## Usage
 
 ```js
 const UniqueSet = require('@sepiariver/unique-set');
@@ -36,9 +38,21 @@ const data = [
   [1, 2, 3],
 ];
 
-let unique = new UniqueSet();
+let unique1 = new UniqueSet();
 data.forEach((el) => {
-  unique.add(el);
+  unique1.add(el);
 });
-console.log(unique.size); // 6 instead of 8 with Set
+let unique2 = new UniqueSet(data);
+console.log(unique1.size); // 6 instead of 8 with Set
+console.log(unique2.size); // 6
 ```
+
+## Testing
+
+1. Clone this repo
+2. `npm install`
+3. `npm run test`
+
+## Contributing
+
+Submit pull requests to https://github.com/sepiariver/unique-set/pulls
