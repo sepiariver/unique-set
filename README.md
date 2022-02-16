@@ -55,4 +55,4 @@ console.log(unique2.size); // 6
 
 ## Contributing
 
-Submit pull requests to https://github.com/sepiariver/unique-set/pulls
+Submit pull requests to [https://github.com/sepiariver/unique-set/pulls]
