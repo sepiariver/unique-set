@@ -2,6 +2,11 @@
 
 function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
 
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = void 0;
+
 var _fastDeepEqual = _interopRequireDefault(require("fast-deep-equal"));
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
@@ -17,6 +22,10 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
 
 function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); Object.defineProperty(Constructor, "prototype", { writable: false }); return Constructor; }
+
+function _get() { if (typeof Reflect !== "undefined" && Reflect.get) { _get = Reflect.get; } else { _get = function _get(target, property, receiver) { var base = _superPropBase(target, property); if (!base) return; var desc = Object.getOwnPropertyDescriptor(base, property); if (desc.get) { return desc.get.call(arguments.length < 3 ? target : receiver); } return desc.value; }; } return _get.apply(this, arguments); }
+
+function _superPropBase(object, property) { while (!Object.prototype.hasOwnProperty.call(object, property)) { object = _getPrototypeOf(object); if (object === null) break; } return object; }
 
 function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function"); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, writable: true, configurable: true } }); Object.defineProperty(subClass, "prototype", { writable: false }); if (superClass) _setPrototypeOf(subClass, superClass); }
 
@@ -44,13 +53,15 @@ var UniqueSet = /*#__PURE__*/function (_Set) {
   var _super = _createSuper(UniqueSet);
 
   function UniqueSet() {
+    var iterable = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : [];
+
     _classCallCheck(this, UniqueSet);
 
-    for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
-      args[_key] = arguments[_key];
+    if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
+      throw new TypeError("UniqueSet requires an iterable");
     }
 
-    return _super.call.apply(_super, [this].concat(args));
+    return _super.call(this, iterable);
   }
 
   _createClass(UniqueSet, [{
@@ -79,12 +90,20 @@ var UniqueSet = /*#__PURE__*/function (_Set) {
     key: "add",
     value: function add(o) {
       if (!this.has(o)) {
-        Set.prototype.add.call(this, o);
+        _get(_getPrototypeOf(UniqueSet.prototype), "add", this).call(this, o);
       }
+
+      return this;
     }
   }]);
 
   return UniqueSet;
 }( /*#__PURE__*/_wrapNativeSuper(Set));
 
-module.exports = UniqueSet;
+var _default = UniqueSet; // Support CommonJS by conditionally setting `module.exports`
+
+exports["default"] = _default;
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = UniqueSet;
+}

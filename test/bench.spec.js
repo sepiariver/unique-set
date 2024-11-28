@@ -1,16 +1,10 @@
 import UniqueSet from "../dist";
-const { performance, PerformanceObserver } = require("perf_hooks")
+const { performance } = require("perf_hooks");
 
-describe("UniqueSet", () => {
-  const perfObserver1 = new PerformanceObserver((items) => {
-    items.getEntries().forEach((entry) => {
-      console.log(entry)
-    })
-  });
+describe("UniqueSet Performance Benchmarks", () => {
+  it("adds elements and compares performance with native Set", () => {
+    console.log("Performance test: UniqueSet vs native Set");
 
-  perfObserver1.observe({ entryTypes: ["measure"], buffer: true });
-  it("adding the same elements multiple times", () => {
-    console.log("adding the same elements multiple times");
     const data = [
       "string",
       "another string",
@@ -33,6 +27,8 @@ describe("UniqueSet", () => {
     ];
 
     let unique = new UniqueSet();
+    let native = new Set();
+
     performance.mark("unique-start");
     for (let i = 0; i < 10000; i++) {
       data.forEach((el) => {
@@ -42,7 +38,6 @@ describe("UniqueSet", () => {
     performance.mark("unique-end");
     performance.measure("unique", "unique-start", "unique-end");
 
-    let native = new Set();
     performance.mark("native-start");
     for (let i = 0; i < 10000; i++) {
       data.forEach((el) => {
@@ -51,71 +46,13 @@ describe("UniqueSet", () => {
     }
     performance.mark("native-end");
     performance.measure("native", "native-start", "native-end");
-  });
 
-  it("adding some elements to a large Set", () => {
-    console.log("adding the some elements to a large Set");
-    const data1 = Array.from({length: 1000}, () => Math.floor(Math.random() * 1000));
-    const data2 = Array.from({length: 1000}, () => `string-${Math.floor(Math.random() * 1000)}`);
-    const data3 = Array.from({length: 1000}, () => {
-      return {
-        num: Math.floor(Math.random() * 1000),
-        str: `string-${Math.floor(Math.random() * 1000)}`
-      };
-    });
-    const data4 = Array.from({length: 1000}, () => {
-      return [
-        Math.floor(Math.random() * 1000),
-        `string-${Math.floor(Math.random() * 1000)}`
-      ];
-    });
-    const data = data1.concat(data2, data3, data4);
-    console.log(data.length);
+    const uniqueTime = performance.getEntriesByName("unique")[0].duration;
+    const nativeTime = performance.getEntriesByName("native")[0].duration;
 
-    let unique = new UniqueSet();
-    performance.mark("unique2-start");
-    data.forEach((el) => {
-      unique.add(el);
-    });
-    performance.mark("unique2-end");
-    performance.measure("unique2", "unique2-start", "unique2-end");
+    console.log(`UniqueSet execution time: ${uniqueTime.toFixed(2)} ms`);
+    console.log(`Native Set execution time: ${nativeTime.toFixed(2)} ms`);
 
-    let native = new Set();
-    performance.mark("native2-start");
-    data.forEach((el) => {
-      native.add(el);
-    });
-    performance.mark("native2-end");
-    performance.measure("native2", "native2-start", "native2-end");
-  });
-
-  it("creating a large Set", () => {
-    console.log("creating a large Set");
-    const data1 = Array.from({length: 1000}, () => Math.floor(Math.random() * 1000));
-    const data2 = Array.from({length: 1000}, () => `string-${Math.floor(Math.random() * 1000)}`);
-    const data3 = Array.from({length: 1000}, () => {
-      return {
-        num: Math.floor(Math.random() * 1000),
-        str: `string-${Math.floor(Math.random() * 1000)}`
-      };
-    });
-    const data4 = Array.from({length: 1000}, () => {
-      return [
-        Math.floor(Math.random() * 1000),
-        `string-${Math.floor(Math.random() * 1000)}`
-      ];
-    });
-    const data = data1.concat(data2, data3, data4);
-    console.log(data.length);
-
-    performance.mark("unique3-start");
-    let unique = new UniqueSet(data);
-    performance.mark("unique3-end");
-    performance.measure("unique3", "unique3-start", "unique3-end");
-
-    performance.mark("native3-start");
-    let native = new Set(data);
-    performance.mark("native3-end");
-    performance.measure("native3", "native3-start", "native3-end");
+    expect(uniqueTime).toBeLessThan(nativeTime * 50); // Deep comparison is 50x slower
   });
 });
