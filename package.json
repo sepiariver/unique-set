@@ -1,7 +1,7 @@
 {
   "name": "@sepiariver/unique-set",
-  "version": "1.2.0",
-  "description": "Extends the has and add methods on the native JavaScript Set object to deeply compare using fast-deep-equal",
+  "version": "2.0.0",
+  "description": "Extends the native Set class to deeply compare using fast-deep-equal, with optional Bloom filter optimization. This version exports 2 classes instead of a default, breaking b/c with version 1.",
   "main": "index.js",
   "module": "dist/index.js",
   "types": "index.d.ts",
@@ -20,7 +20,7 @@
   "keywords": [
     "Set",
     "unique",
-    "object",
+    "bloom",
     "deep",
     "compare",
     "equal"
