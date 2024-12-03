@@ -19,6 +19,8 @@ function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
 
 function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
 
+function _readOnlyError(name) { throw new TypeError("\"" + name + "\" is read-only"); }
+
 function _createForOfIteratorHelper(o, allowArrayLike) { var it = typeof Symbol !== "undefined" && o[Symbol.iterator] || o["@@iterator"]; if (!it) { if (Array.isArray(o) || (it = _unsupportedIterableToArray(o)) || allowArrayLike && o && typeof o.length === "number") { if (it) o = it; var i = 0; var F = function F() {}; return { s: F, n: function n() { if (i >= o.length) return { done: true }; return { done: false, value: o[i++] }; }, e: function e(_e2) { throw _e2; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var normalCompletion = true, didErr = false, err; return { s: function s() { it = it.call(o); }, n: function n() { var step = it.next(); normalCompletion = step.done; return step; }, e: function e(_e3) { didErr = true; err = _e3; }, f: function f() { try { if (!normalCompletion && it["return"] != null) it["return"](); } finally { if (didErr) throw err; } } }; }
 
 function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
@@ -138,12 +140,7 @@ var BloomSet = /*#__PURE__*/function (_Set2) {
     var _this2;
 
     var iterable = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : [];
-
-    var _ref = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-        _ref$size = _ref.size,
-        size = _ref$size === void 0 ? 28755000 : _ref$size,
-        _ref$hashCount = _ref.hashCount,
-        hashCount = _ref$hashCount === void 0 ? 20 : _ref$hashCount;
+    var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
 
     _classCallCheck(this, BloomSet);
 
@@ -153,14 +150,24 @@ var BloomSet = /*#__PURE__*/function (_Set2) {
 
     _this2 = _super2.call(this);
 
+    if (!options || _typeof(options) !== "object") {
+      options = {};
+    }
+
+    var _options = options,
+        _options$size = _options.size,
+        size = _options$size === void 0 ? 6553577 : _options$size,
+        _options$hashCount = _options.hashCount,
+        hashCount = _options$hashCount === void 0 ? 7 : _options$hashCount;
+
     if (typeof size !== "number" || size <= 0) {
-      size = 28755000; // < 5 false positives, with 1M elements, using 3.5Mb RAM, needs 20 hashes
+      6553577, _readOnlyError("size"); // Targeting < 1 collision per 100,000 elements, ~819 KB memory, needs 7 hashes
     }
 
     _this2.aSize = _this2._findNextPrime(size);
 
     if (typeof hashCount !== "number" || hashCount <= 0) {
-      hashCount = 20;
+      7, _readOnlyError("hashCount");
     }
 
     _this2.hashCount = hashCount;
@@ -223,18 +230,18 @@ var BloomSet = /*#__PURE__*/function (_Set2) {
         if (Array.isArray(item)) {
           return "[".concat(item.map(serialize).join(","), "]");
         } else {
-          return "{".concat(Object.entries(item).sort(function (_ref2, _ref3) {
-            var _ref4 = _slicedToArray(_ref2, 1),
-                a = _ref4[0];
+          return "{".concat(Object.entries(item).sort(function (_ref, _ref2) {
+            var _ref3 = _slicedToArray(_ref, 1),
+                a = _ref3[0];
 
-            var _ref5 = _slicedToArray(_ref3, 1),
-                b = _ref5[0];
+            var _ref4 = _slicedToArray(_ref2, 1),
+                b = _ref4[0];
 
             return a.localeCompare(b);
-          }).map(function (_ref6) {
-            var _ref7 = _slicedToArray(_ref6, 2),
-                k = _ref7[0],
-                v = _ref7[1];
+          }).map(function (_ref5) {
+            var _ref6 = _slicedToArray(_ref5, 2),
+                k = _ref6[0],
+                v = _ref6[1];
 
             return "".concat(k, ":").concat(serialize(v));
           }).join(","), "}");
@@ -255,10 +262,8 @@ var BloomSet = /*#__PURE__*/function (_Set2) {
 
 
       for (var i = 0; i < this.hashCount; i++) {
-        while (hash >= this.aSize) {
-          hash -= this.aSize; // Ensure hash is within bounds
-        } // Track
-
+        hash %= this.aSize; // Ensure within bounds
+        // Track
 
         hashes.push(hash); // Modify
 

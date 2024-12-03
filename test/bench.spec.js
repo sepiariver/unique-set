@@ -32,7 +32,7 @@ function generateDataset(size) {
 }
 
 describe("Performance Benchmarks", () => {
-  const datasetSizes = [1000, 20000];
+  const datasetSizes = [400, 1000, 20000];
   const iterations = 1;
   for (const datasetSize of datasetSizes) {
     const { data, expectedDupes, stringDupes } = generateDataset(datasetSize);

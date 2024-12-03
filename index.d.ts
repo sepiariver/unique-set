@@ -33,8 +33,8 @@ declare module "unique-set" {
      * Creates a new `BloomSet` instance.
      * @param iterable Optional: an iterable object with which to initialize the BloomSet.
      * @param options Bloom filter configuration options.
-     * @param options.size The size of the Bloom filter's bit array. Defaults to 28,755,000.
-     * @param options.hashCount The number of hash functions to use. Defaults to 20.
+     * @param options.size The size of the Bloom filter's bit array. Defaults to 6553577.
+     * @param options.hashCount The number of hash functions to use. Defaults to 7.
      * @throws TypeError If the input is not iterable.
      */
     constructor(
@@ -50,7 +50,7 @@ declare module "unique-set" {
     has(o: T): boolean;
 
     /**
-     * Adds a new object to the BloomSet  if it is not already present.
+     * Adds a new object to the BloomSet if it is not already present.
      * @param o The object to add to the BloomSet.
      * @returns The `BloomSet` instance, allowing for chaining.
      */

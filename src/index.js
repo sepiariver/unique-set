@@ -29,19 +29,25 @@ export class UniqueSet extends Set {
 }
 
 export class BloomSet extends Set {
-  constructor(iterable = [], { size = 28755000, hashCount = 20 } = {}) {
+  constructor(iterable = [], options = {}) {
     if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
       throw new TypeError("BloomSet requires an iterable");
     }
     super();
 
+    if (!options || typeof options !== "object") {
+      options = {};
+    }
+
+    const { size = 6553577, hashCount = 7 } = options;
+
     if (typeof size !== "number" || size <= 0) {
-      size = 28755000; // < 5 false positives, with 1M elements, using 3.5Mb RAM, needs 20 hashes
+      size = 6553577; // Targeting < 1 collision per 100,000 elements, ~819 KB memory, needs 7 hashes
     }
     this.aSize = this._findNextPrime(size);
 
     if (typeof hashCount !== "number" || hashCount <= 0) {
-      hashCount = 20;
+      hashCount = 7;
     }
     this.hashCount = hashCount;
 
@@ -103,9 +109,7 @@ export class BloomSet extends Set {
 
     // Bloom into hashCount hash values
     for (let i = 0; i < this.hashCount; i++) {
-      while (hash >= this.aSize) {
-        hash -= this.aSize; // Ensure hash is within bounds
-      }
+      hash %= this.aSize; // Ensure within bounds
       // Track
       hashes.push(hash);
       // Modify
