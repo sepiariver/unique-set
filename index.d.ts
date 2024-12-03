@@ -57,5 +57,4 @@ declare module "unique-set" {
     add(o: T): this;
   }
 
-  export { UniqueSet, BloomSet };
 }
