@@ -2,34 +2,44 @@ import { BloomSet, UniqueSet } from "../dist";
 const { performance } = require("perf_hooks");
 
 function generateDataset(size) {
-  const dataset = [];
+  const data = [];
   const limit = size * 2;
+  let expectedDupes = 0;
+  let stringDupes = 0;
   for (let i = size; i < limit; i++) {
     if (i % 3 === 0) {
-      dataset.push({ key: i, value: `value-${i}` });
+      data.push({ key: i, value: `value-${i}` });
       if (i % 7 === 0) {
-        dataset.push({ key: i, value: `value-${i}` }); // Duplicate object
+        data.push({ key: i, value: `value-${i}` }); // Duplicate object
+        expectedDupes++;
       }
     } else if (i % 3 === 1) {
-      dataset.push([i, `value-${i}`]);
+      data.push([i, `value-${i}`]);
       if (i % 11 === 0) {
-        dataset.push([i, `value-${i}`]); // Duplicate array
+        data.push([i, `value-${i}`]); // Duplicate array
+        expectedDupes++;
       }
     } else {
-      dataset.push(`string-${i}`);
+      data.push(`string-${i}`);
       if (i % 5 === 0) {
-        dataset.push(`string-${i}`); // Duplicate string
+        data.push(`string-${i}`); // Duplicate string
+        stringDupes++;
       }
     }
   }
-  return dataset;
+
+  return { data, expectedDupes, stringDupes };
 }
 
 describe("Performance Benchmarks", () => {
   const datasetSizes = [1000, 20000];
   const iterations = 1;
   for (const datasetSize of datasetSizes) {
-    const data = generateDataset(datasetSize);
+    const { data, expectedDupes, stringDupes } = generateDataset(datasetSize);
+    const dataSize = data.length;
+    const expectedNativeSize = dataSize - stringDupes;
+    const expectedSize = expectedNativeSize - expectedDupes;
+
     let uniqueTiming = 0;
     it("UniqueSet vs native Set: " + String(datasetSize), () => {
       console.log(
@@ -75,6 +85,19 @@ describe("Performance Benchmarks", () => {
 
       expect(nativeTime).toBeLessThan(uniqueTime);
       uniqueTiming = uniqueTime;
+
+      console.log(
+        "UniqueSet size: " + unique.size,
+        "Expected size: " + expectedSize
+      );
+      expect(unique.size).toBe(expectedSize);
+
+      console.log(
+        "Native Set size: " + native.size,
+        "Expected size: " + expectedNativeSize
+      );
+      // Native Set will have duplicates
+      expect(native.size).toBe(expectedNativeSize);
     });
 
     it("BloomSet vs native Set: " + String(datasetSize), () => {
@@ -121,6 +144,19 @@ describe("Performance Benchmarks", () => {
 
       expect(nativeTime).toBeLessThan(bloomTime);
       expect(bloomTime).toBeLessThan(uniqueTiming);
+
+      console.log(
+        "BloomSet size: " + bloom.size,
+        "Expected size: " + expectedSize
+      );
+      expect(bloom.size).toBe(expectedSize);
+
+      console.log(
+        "Native Set size: " + native.size,
+        "Expected size: " + expectedNativeSize
+      );
+      // Native Set will have duplicates
+      expect(native.size).toBe(expectedNativeSize);
     });
   }
 });
