@@ -171,7 +171,6 @@ export class BloomSet extends Set {
   }
 }
 
-// Support CommonJS by conditionally setting `module.exports`
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     UniqueSet,

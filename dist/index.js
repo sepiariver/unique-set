@@ -372,8 +372,7 @@ var BloomSet = /*#__PURE__*/function (_Set2) {
   }]);
 
   return BloomSet;
-}( /*#__PURE__*/_wrapNativeSuper(Set)); // Support CommonJS by conditionally setting `module.exports`
-
+}( /*#__PURE__*/_wrapNativeSuper(Set));
 
 exports.BloomSet = BloomSet;
 
