@@ -1,4 +1,4 @@
-import { BloomSet, UniqueSet } from "../dist";
+import { BloomSet, UniqueSet } from "../dist/index.mjs";
 import { performance } from "perf_hooks";
 import { describe, it, expect, test } from 'vitest';
 

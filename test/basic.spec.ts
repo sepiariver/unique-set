@@ -1,4 +1,4 @@
-import { BloomSet, UniqueSet } from "../dist";
+import { BloomSet, UniqueSet } from "../dist/index.mjs";
 import { describe, it, expect, test } from 'vitest';
 
 const data = [
@@ -29,7 +29,6 @@ describe("UniqueSet", () => {
   it("adds unique objects", () => {
     const unique = new UniqueSet();
     data.forEach((el) => unique.add(el));
-
     expect(Array.from(unique)).toEqual(expected);
     expect(unique.size).toBe(7);
   });
