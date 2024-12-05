@@ -1,4 +1,5 @@
 import { BloomSet, UniqueSet } from "../dist";
+import { describe, it, expect, test } from 'vitest';
 
 const data = [
   "string",

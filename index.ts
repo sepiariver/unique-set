@@ -1,7 +1,9 @@
-import equal from "fast-deep-equal";
+import equal from "fast-deep-equal/es6";
 
-export class UniqueSet extends Set {
-  constructor(iterable = []) {
+/** A `Set` extension that ensures uniqueness of items using deep equality checks. */
+export class UniqueSet<T> extends Set<T> {
+  /*** @throws TypeError If the input is not iterable. */
+  constructor(iterable : Iterable<T> = []) {
     if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
       throw new TypeError("UniqueSet requires an iterable");
     }
@@ -10,8 +12,12 @@ export class UniqueSet extends Set {
       this.add(item);
     }
   }
-
-  has(o) {
+  /**
+   * Determines whether an object is in the UniqueSet using deep equality.
+   * @param o The object to check for presence in the UniqueSet.
+   * @returns `true` if the object is found, `false` otherwise.
+   */
+  has(o: T): boolean {
     for (const i of this) {
       if (equal(o, i)) {
         return true;
@@ -19,8 +25,12 @@ export class UniqueSet extends Set {
     }
     return false;
   }
-
-  add(o) {
+  /**
+   * Adds a new object to the UniqueSet if it is not already present.
+   * @param o The object to add to the UniqueSet.
+   * @returns The `UniqueSet` instance, allowing for chaining.
+   */
+  add(o: T): this {
     if (!this.has(o)) {
       super.add(o);
     }
@@ -28,8 +38,23 @@ export class UniqueSet extends Set {
   }
 }
 
-export class BloomSet extends Set {
-  constructor(iterable = [], options = {}) {
+/** A `Set` extension that uses a Bloom filter for fast existence checks combined with deep equality for accuracy. */
+export class BloomSet<T> extends Set<T> {
+  #bitArray : Uint8Array;
+  #aSize : number;
+  #hashCount : number;
+  /**
+   * Creates a new `BloomSet` instance.
+   * @param iterable Optional: an iterable object with which to initialize the BloomSet.
+   * @param options Bloom filter configuration options.
+   * @param options.size The size of the Bloom filter's bit array. Defaults to 6553577.
+   * @param options.hashCount The number of hash functions to use. Defaults to 7.
+   * @throws TypeError If the input is not iterable.
+   */
+  constructor(
+    iterable: Iterable<T> = [],
+    options: { size?: number; hashCount?: number } = {}
+  ) {
     if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
       throw new TypeError("BloomSet requires an iterable");
     }
@@ -39,37 +64,41 @@ export class BloomSet extends Set {
       options = {};
     }
 
-    const { size = 6553577, hashCount = 7 } = options;
+    options.hashCount ??= 7;
+    options.size ??= 6553577;
+
+    let {size, hashCount} = options;
 
     if (typeof size !== "number" || size <= 0) {
       size = 6553577; // Targeting < 1 collision per 100,000 elements, ~819 KB memory, needs 7 hashes
     }
-    this.aSize = this._findNextPrime(size);
+    this.#aSize = this.#findNextPrime(size);
 
     if (typeof hashCount !== "number" || hashCount <= 0) {
       hashCount = 7;
     }
-    this.hashCount = hashCount;
-
-    this.bitArray = new Uint8Array(Math.ceil(size / 8));
+    this.#hashCount = hashCount;
+    this.#bitArray = new Uint8Array(Math.ceil(size / 8));
 
     for (const item of iterable) {
       this.add(item);
     }
   }
 
-  _findNextPrime(num) {
+  /** @internal */
+  #findNextPrime(num : number) {
     if (num < 2) return 2;
     if (num % 2 === 0) num++; // Odd numbers only
 
-    while (!this._isPrime(num)) {
+    while (!this.#isPrime(num)) {
       num += 2; // Odd numbers only
     }
 
     return num;
   }
 
-  _isPrime(num) {
+  /** @internal */
+  #isPrime(num : number) {
     if (num < 2) return false;
     if (num === 2 || num === 3) return true;
     if (num % 2 === 0 || num % 3 === 0) return false;
@@ -82,13 +111,14 @@ export class BloomSet extends Set {
     return true;
   }
 
-  _serialize(item) {
+  /** @internal */
+  #serialize(item : T | number | object) : string {
     if (typeof item === "number" && isNaN(item)) {
       return "NaN";
     }
 
     if (item && typeof item === "object") {
-      const serialize = this._serialize.bind(this);
+      const serialize = this.#serialize.bind(this);
       if (Array.isArray(item)) {
         return `[${item.map(serialize).join(",")}]`;
       } else {
@@ -102,14 +132,15 @@ export class BloomSet extends Set {
     return String(item);
   }
 
-  _hashes(item) {
-    const hashes = [];
-    const str = this._serialize(item);
-    let hash = this._fnv1a(str); // Base hash
+  /** @internal */
+  #hashes(item : T) {
+    const hashes : number[] = [];
+    const str = this.#serialize(item);
+    let hash = this.#fnv1a(str); // Base hash
 
     // Bloom into hashCount hash values
-    for (let i = 0; i < this.hashCount; i++) {
-      hash %= this.aSize; // Ensure within bounds
+    for (let i = 0; i < this.#hashCount; i++) {
+      hash %= this.#aSize; // Ensure within bounds
       // Track
       hashes.push(hash);
       // Modify
@@ -120,7 +151,8 @@ export class BloomSet extends Set {
     return hashes;
   }
 
-  _fnv1a(str) {
+  /** @internal */
+  #fnv1a(str : string) {
     if (typeof str !== "string") {
       str = String(str);
     }
@@ -132,28 +164,30 @@ export class BloomSet extends Set {
     return hash >>> 0;
   }
 
-  _setBits(hashes) {
+  /** @internal */
+  #setBits(hashes : number[]) : void {
     for (const hash of hashes) {
       const index = Math.floor(hash / 8);
       const bit = hash % 8;
-      this.bitArray[index] |= 1 << bit;
+      this.#bitArray[index]! |= 1 << bit;
     }
   }
 
-  _checkBits(hashes) {
+  /** @internal */
+  #checkBits(hashes : number[]) : boolean {
     for (const hash of hashes) {
       const index = Math.floor(hash / 8);
       const bit = hash % 8;
-      if (!(this.bitArray[index] & (1 << bit))) {
+      if (!(this.#bitArray[index]! & (1 << bit))) {
         return false;
       }
     }
     return true;
   }
-
-  has(o) {
-    const hashes = this._hashes(o);
-    if (!this._checkBits(hashes)) {
+  /** Determines existence of an object in the BloomSet using the Bloom filter and deep equality */
+  has(o: T): boolean {
+    const hashes = this.#hashes(o);
+    if (!this.#checkBits(hashes)) {
       return false; // Definitely not in the set
     }
     // Fall back to fast-deep-equal for false positives
@@ -164,20 +198,15 @@ export class BloomSet extends Set {
     }
     return false;
   }
-
-  add(o) {
+  /** Adds a new object to the BloomSet if it is not already present.
+   * @returns The `BloomSet` instance, allowing for chaining.
+   */
+  add(o: T): this {
     if (!this.has(o)) {
-      const hashes = this._hashes(o);
-      this._setBits(hashes);
+      const hashes = this.#hashes(o);
+      this.#setBits(hashes);
       super.add(o);
     }
     return this;
   }
-}
-
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
-    UniqueSet,
-    BloomSet,
-  };
 }

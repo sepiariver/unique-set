@@ -1,5 +1,6 @@
 import { BloomSet, UniqueSet } from "../dist";
-const { performance } = require("perf_hooks");
+import { performance } from "perf_hooks";
+import { describe, it, expect, test } from 'vitest';
 
 function generateDataset(size) {
   const data = [];
