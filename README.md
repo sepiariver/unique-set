@@ -4,15 +4,25 @@ Extends the native `Set` class to deeply compare using [fast-deep-equal](https:/
 
 Supports ESM and CommonJS.
 
+```js
+import { BloomSet, UniqueSet } from '@sepiariver/unique-set';
+```
+
+```js
+const { BloomSet, UniqueSet } = require('@sepiariver/unique-set');
+```
+
 WARNING: This version exports 2 classes instead of a single default class, breaking b/c with version 1.
 
-The extended methods iterate through the elements of the `UniqueSet` until equality is found. If no elements match, the entire `UniqueSet` would have been iterated. However fast `fast-deep-equal` is, calling it in a loop like this makes performance many, many times worse than the native `Set`. For datasets greater than a thousand elements, there is probably a better way to achieve what you're trying to do. Otherwise, `UniqueSet` is convenient.
+The overridden methods iterate through the elements of the `UniqueSet` deeply comparing equality until existence is found. If no elements match, the entire `UniqueSet` would have been iterated. However fast `fast-deep-equal` is [reported to be](https://github.com/epoberezkin/fast-deep-equal?tab=readme-ov-file#performance-benchmark), its time complexity is dependent on the depth of objects being compared. Calling it in a loop makes performance many, many times worse than the native `Set`.
 
-UPDATE: Version 2 ships with `BloomSet`, in which equality checks are optimized with a Bloom filter. This class is useful for larger datasets, performing about 3-10 times faster than `UniqueSet` for datasets greater than 1000 elements. Less than a few hundred (~400) elements, `UniqueSet` is faster. `BloomSet`'s probabilistic false positives are covered by a fallback to `fast-deep-equal`. BloomSet is still orders of magnitude slower than the native `Set`, but if deep equality is required, this is a decent option.
+_For datasets greater than a thousand elements, there is probably a better way to achieve what you're trying to do._ Otherwise, `UniqueSet` is convenient.
 
-Experiment with configurations to find the best performance for your use case.
+**UPDATE:** Version 2 ships with `BloomSet`, which uses a Bloom filter to greatly optimize absence checks, falling back to `fast-deep-equal` to validate potential false positives. This class is useful for larger datasets, up to the tens of thousands or even 100k depending largely on configuration. It performs about 3-10 times faster than `UniqueSet` for datasets greater than 1000 elements. Less than a few hundred (~400) elements, `UniqueSet` can be faster—it all depens on your dataset and config options. In all scenarios except the absolute best case, BloomSet is still orders of magnitude slower than the native `Set`, but if deep equality is required, this is a decent option.
 
-NOTE: The `delete` method is unmodified. In the case of duplicate objects that are equivalent but have different references, the results of `delete` operations may be unexpected.
+Highly recommended: experiment with config options to find the best performance for your use case.
+
+IMPORTANT: The `delete` method is unmodified in both classes. In the case of duplicate objects that are equivalent but have different references, the results of `delete` operations may be unexpected.
 
 ## Config Options
 
