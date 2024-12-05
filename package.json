@@ -2,16 +2,17 @@
   "name": "@sepiariver/unique-set",
   "version": "2.0.0",
   "description": "Extends the native Set class to deeply compare using fast-deep-equal, with optional Bloom filter optimization. This version exports 2 classes instead of a default, breaking b/c with version 1.",
-  "main": "index.js",
-  "module": "dist/index.js",
-  "types": "index.d.ts",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
   "exports": {
-    "require": "./index.js",
-    "import": "./dist/index.js"
+    "require": "./dist/index.js",
+    "import": "./dist/index.mjs"
   },
   "scripts": {
-    "test": "jest",
-    "build": "babel src -d dist"
+    "test": "vitest",
+    "lint": "tsc",
+    "build": "tsup index.ts --format esm --dts"
   },
   "repository": {
     "type": "git",
@@ -32,13 +33,11 @@
   },
   "homepage": "https://github.com/sepiariver/unique-set#readme",
   "dependencies": {
-    "fast-deep-equal": "^3.1.3"
+    "fast-deep-equal": "^3.1.3",
+    "typescript": "^5.7.2"
   },
   "devDependencies": {
-    "@babel/cli": "^7.17.6",
-    "@babel/core": "^7.17.8",
-    "@babel/preset-env": "^7.16.11",
-    "babel-jest": "^27.5.1",
-    "jest": "^27.5.1"
+    "tsup": "^8.3.5",
+    "vitest": "^2.1.8"
   }
 }
