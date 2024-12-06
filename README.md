@@ -82,7 +82,6 @@ console.log(bloomSet.has("custom")); // true
 - Use a larger size for datasets exceeding 100,000 elements.
 - Reduce hashCount if performance is critical and your dataset contains very few duplicates.
 
-
 ## Installation
 
 ```cli
