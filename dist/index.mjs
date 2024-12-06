@@ -1,5 +1,47 @@
 // index.ts
 import equal from "fast-deep-equal/es6/index.js";
+var serialize = (item) => {
+  if (typeof item === "number" && isNaN(item)) {
+    return "NaN";
+  }
+  if (item && typeof item === "object") {
+    if (Array.isArray(item)) {
+      return `[${item.map(serialize).join("")}]`;
+    } else {
+      return `{${Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${serialize(v)}`).join("")}}`;
+    }
+  }
+  return String(item);
+};
+var fnv1a = (str) => {
+  if (typeof str !== "string") {
+    str = String(str);
+  }
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = hash * 16777619 >>> 0;
+  }
+  return hash >>> 0;
+};
+var findNextPrime = (num) => {
+  if (num < 2) return 2;
+  if (num % 2 === 0) num++;
+  while (isPrime(num)) {
+    num += 2;
+  }
+  return num;
+};
+var isPrime = (num) => {
+  if (num < 2) return false;
+  if (num === 2 || num === 3) return true;
+  if (num % 2 === 0 || num % 3 === 0) return false;
+  const sqrt = Math.floor(Math.sqrt(num));
+  for (let i = 5; i <= sqrt; i += 6) {
+    if (num % i === 0 || num % (i + 2) === 0) return false;
+  }
+  return true;
+};
 var UniqueSet = class extends Set {
   /*** @throws TypeError If the input is not iterable. */
   constructor(iterable = []) {
@@ -62,7 +104,7 @@ var BloomSet = class extends Set {
     if (typeof size !== "number" || size <= 0) {
       size = 6553577;
     }
-    this.#aSize = this.#findNextPrime(size);
+    this.#aSize = findNextPrime(size);
     if (typeof hashCount !== "number" || hashCount <= 0) {
       hashCount = 7;
     }
@@ -73,45 +115,10 @@ var BloomSet = class extends Set {
     }
   }
   /** @internal */
-  #findNextPrime(num) {
-    if (num < 2) return 2;
-    if (num % 2 === 0) num++;
-    while (!this.#isPrime(num)) {
-      num += 2;
-    }
-    return num;
-  }
-  /** @internal */
-  #isPrime(num) {
-    if (num < 2) return false;
-    if (num === 2 || num === 3) return true;
-    if (num % 2 === 0 || num % 3 === 0) return false;
-    const sqrt = Math.floor(Math.sqrt(num));
-    for (let i = 5; i <= sqrt; i += 6) {
-      if (num % i === 0 || num % (i + 2) === 0) return false;
-    }
-    return true;
-  }
-  /** @internal */
-  #serialize(item) {
-    if (typeof item === "number" && isNaN(item)) {
-      return "NaN";
-    }
-    if (item && typeof item === "object") {
-      const serialize = this.#serialize.bind(this);
-      if (Array.isArray(item)) {
-        return `[${item.map(serialize).join(",")}]`;
-      } else {
-        return `{${Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${serialize(v)}`).join(",")}}`;
-      }
-    }
-    return String(item);
-  }
-  /** @internal */
   #hashes(item) {
     const hashes = [];
-    const str = this.#serialize(item);
-    let hash = this.#fnv1a(str);
+    const str = serialize(item);
+    let hash = fnv1a(str);
     for (let i = 0; i < this.#hashCount; i++) {
       hash %= this.#aSize;
       hashes.push(hash);
@@ -119,18 +126,6 @@ var BloomSet = class extends Set {
       hash >>>= 0;
     }
     return hashes;
-  }
-  /** @internal */
-  #fnv1a(str) {
-    if (typeof str !== "string") {
-      str = String(str);
-    }
-    let hash = 2166136261;
-    for (let i = 0; i < str.length; i++) {
-      hash ^= str.charCodeAt(i);
-      hash = hash * 16777619 >>> 0;
-    }
-    return hash >>> 0;
   }
   /** @internal */
   #setBits(hashes) {

@@ -1,5 +1,63 @@
 import equal from "fast-deep-equal/es6/index.js";
 
+/** Utility functions */
+
+const serialize = (item: any | number | object): string => {
+  if (typeof item === "number" && isNaN(item)) {
+    return "NaN";
+  }
+
+  if (item && typeof item === "object") {
+    if (Array.isArray(item)) {
+      return `[${item.map(serialize).join("")}]`;
+    } else {
+      return `{${Object.entries(item)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}:${serialize(v)}`)
+        .join("")}}`;
+    }
+  }
+
+  return String(item);
+};
+
+const fnv1a = (str: string) => {
+  if (typeof str !== "string") {
+    str = String(str);
+  }
+  let hash = 2166136261; // FNV offset basis for 32-bit
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = (hash * 16777619) >>> 0; // Multiply by the FNV prime and ensure 32-bit unsigned
+  }
+  return hash >>> 0;
+};
+
+const findNextPrime = (num: number) => {
+  if (num < 2) return 2;
+  if (num % 2 === 0) num++; // Odd numbers only
+
+  while (isPrime(num)) {
+    num += 2; // Odd numbers only
+  }
+
+  return num;
+};
+
+/** @internal */
+const isPrime = (num: number) => {
+  if (num < 2) return false;
+  if (num === 2 || num === 3) return true;
+  if (num % 2 === 0 || num % 3 === 0) return false;
+
+  const sqrt = Math.floor(Math.sqrt(num));
+  for (let i = 5; i <= sqrt; i += 6) {
+    if (num % i === 0 || num % (i + 2) === 0) return false;
+  }
+
+  return true;
+};
+
 /** A `Set` extension that ensures uniqueness of items using deep equality checks. */
 export class UniqueSet<T> extends Set<T> {
   /*** @throws TypeError If the input is not iterable. */
@@ -72,7 +130,7 @@ export class BloomSet<T> extends Set<T> {
     if (typeof size !== "number" || size <= 0) {
       size = 6553577; // Targeting < 1 collision per 100,000 elements, ~819 KB memory, needs 7 hashes
     }
-    this.#aSize = this.#findNextPrime(size);
+    this.#aSize = findNextPrime(size);
 
     if (typeof hashCount !== "number" || hashCount <= 0) {
       hashCount = 7;
@@ -86,57 +144,10 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #findNextPrime(num: number) {
-    if (num < 2) return 2;
-    if (num % 2 === 0) num++; // Odd numbers only
-
-    while (!this.#isPrime(num)) {
-      num += 2; // Odd numbers only
-    }
-
-    return num;
-  }
-
-  /** @internal */
-  #isPrime(num: number) {
-    if (num < 2) return false;
-    if (num === 2 || num === 3) return true;
-    if (num % 2 === 0 || num % 3 === 0) return false;
-
-    const sqrt = Math.floor(Math.sqrt(num));
-    for (let i = 5; i <= sqrt; i += 6) {
-      if (num % i === 0 || num % (i + 2) === 0) return false;
-    }
-
-    return true;
-  }
-
-  /** @internal */
-  #serialize(item: T | number | object): string {
-    if (typeof item === "number" && isNaN(item)) {
-      return "NaN";
-    }
-
-    if (item && typeof item === "object") {
-      const serialize = this.#serialize.bind(this);
-      if (Array.isArray(item)) {
-        return `[${item.map(serialize).join(",")}]`;
-      } else {
-        return `{${Object.entries(item)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([k, v]) => `${k}:${serialize(v)}`)
-          .join(",")}}`;
-      }
-    }
-
-    return String(item);
-  }
-
-  /** @internal */
   #hashes(item: T) {
     const hashes: number[] = [];
-    const str = this.#serialize(item);
-    let hash = this.#fnv1a(str); // Base hash
+    const str = serialize(item);
+    let hash = fnv1a(str); // Base hash
 
     // Bloom into hashCount hash values
     for (let i = 0; i < this.#hashCount; i++) {
@@ -149,19 +160,6 @@ export class BloomSet<T> extends Set<T> {
     }
 
     return hashes;
-  }
-
-  /** @internal */
-  #fnv1a(str: string) {
-    if (typeof str !== "string") {
-      str = String(str);
-    }
-    let hash = 2166136261; // FNV offset basis for 32-bit
-    for (let i = 0; i < str.length; i++) {
-      hash ^= str.charCodeAt(i);
-      hash = (hash * 16777619) >>> 0; // Multiply by the FNV prime and ensure 32-bit unsigned
-    }
-    return hash >>> 0;
   }
 
   /** @internal */
