@@ -137,10 +137,19 @@ console.log(bloom2.size); // 6
 2. `npm install`
 3. `npm run test`
 
+## Issues
+
+Issue reporting is encouraged: [https://github.com/sepiariver/unique-set/issues]
+
 ## Contributing
 
 Submit pull requests to [https://github.com/sepiariver/unique-set/pulls]
 
-## Issues
+## Contributors
 
-Issue reporting is encouraged: [https://github.com/sepiariver/unique-set/issues]
+- @sepiariver
+- @sakgoyal
+
+## License
+
+MIT

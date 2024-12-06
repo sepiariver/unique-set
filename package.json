@@ -10,7 +10,8 @@
     "import": "./dist/index.mjs"
   },
   "scripts": {
-    "test": "npm run build && vitest",
+    "test": "npm run build && vitest basic.spec.ts",
+    "bench": "npm run build && vitest bench.spec.ts bench-nested.spec.ts",
     "lint": "tsc",
     "build": "tsup index.ts --format esm --dts"
   },
