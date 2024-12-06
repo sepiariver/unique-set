@@ -40,7 +40,11 @@ function generateDataset(size: number): Dataset {
 }
 
 describe("Performance Benchmarks", () => {
-  const datasetConfigs = { 400: { hashCount: 2 }, 1000: {}, 20000: {} };
+  const datasetConfigs = {
+    400: { hashCount: 1 },
+    1000: { hashCount: 1 },
+    40000: { hashCount: 1 },
+  };
   const iterations = 1;
   for (const [datasetSize, conf] of Object.entries(datasetConfigs)) {
     const { data, expectedDupes, stringDupes } = generateDataset(
