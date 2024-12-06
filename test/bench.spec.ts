@@ -2,8 +2,15 @@ import { BloomSet, UniqueSet } from "../dist/index.mjs";
 import { performance } from "perf_hooks";
 import { describe, it, expect, test } from 'vitest';
 
-function generateDataset(size) {
-  const data = [];
+interface Dataset {
+  data: (string | [number, string] | { key: number; value: string })[];
+  expectedDupes: number;
+  stringDupes: number;
+}
+
+function generateDataset(size: number): Dataset {
+  const data: (string | [number, string] | { key: number; value: string })[] =
+    [];
   const limit = size * 2;
   let expectedDupes = 0;
   let stringDupes = 0;
@@ -33,10 +40,12 @@ function generateDataset(size) {
 }
 
 describe("Performance Benchmarks", () => {
-  const datasetSizes = [400, 1000, 20000];
+  const datasetConfigs = { 400: { hashCount: 2 }, 1000: {}, 20000: {} };
   const iterations = 1;
-  for (const datasetSize of datasetSizes) {
-    const { data, expectedDupes, stringDupes } = generateDataset(datasetSize);
+  for (const [datasetSize, conf] of Object.entries(datasetConfigs)) {
+    const { data, expectedDupes, stringDupes } = generateDataset(
+      parseInt(datasetSize)
+    );
     const dataSize = data.length;
     const expectedNativeSize = dataSize - stringDupes;
     const expectedSize = expectedNativeSize - expectedDupes;
@@ -74,9 +83,11 @@ describe("Performance Benchmarks", () => {
         "native-end" + String(datasetSize)
       );
 
+      // @ts-ignore
       const uniqueTime = performance.getEntriesByName(
         "unique" + String(datasetSize)
       )[0].duration;
+      // @ts-ignore
       const nativeTime = performance.getEntriesByName(
         "native" + String(datasetSize)
       )[0].duration;
@@ -133,9 +144,11 @@ describe("Performance Benchmarks", () => {
         "native-end" + String(datasetSize)
       );
 
+      // @ts-ignore
       const bloomTime = performance.getEntriesByName(
         "bloom" + String(datasetSize)
       )[0].duration;
+      // @ts-ignore
       const nativeTime = performance.getEntriesByName(
         "native" + String(datasetSize)
       )[1].duration;
