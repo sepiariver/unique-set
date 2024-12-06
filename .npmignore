@@ -44,6 +44,7 @@ babel.config.js
 
 # tests
 test
+temp*.*js
 
 # github
 .github

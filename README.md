@@ -2,7 +2,7 @@
 
 Extends the native `Set` class to deeply compare using [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal), with optional Bloom filter optimization.
 
-Supports ESM and CommonJS. Thanks @sakgoyal for contributing to and instigating ESM support.
+Supports ESM and CommonJS. Thanks [@sakgoyal](https://github.com/sakgoyal) for contributing to and instigating ESM support.
 
 ```js
 import { BloomSet, UniqueSet } from '@sepiariver/unique-set';
