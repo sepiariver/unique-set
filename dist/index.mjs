@@ -1,5 +1,5 @@
 // index.ts
-import equal from "fast-deep-equal/es6";
+import equal from "fast-deep-equal/es6/index.js";
 var UniqueSet = class extends Set {
   /*** @throws TypeError If the input is not iterable. */
   constructor(iterable = []) {

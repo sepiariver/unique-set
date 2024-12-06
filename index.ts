@@ -1,9 +1,9 @@
-import equal from "fast-deep-equal/es6";
+import equal from "fast-deep-equal/es6/index.js";
 
 /** A `Set` extension that ensures uniqueness of items using deep equality checks. */
 export class UniqueSet<T> extends Set<T> {
   /*** @throws TypeError If the input is not iterable. */
-  constructor(iterable : Iterable<T> = []) {
+  constructor(iterable: Iterable<T> = []) {
     if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
       throw new TypeError("UniqueSet requires an iterable");
     }
@@ -40,9 +40,9 @@ export class UniqueSet<T> extends Set<T> {
 
 /** A `Set` extension that uses a Bloom filter for fast existence checks combined with deep equality for accuracy. */
 export class BloomSet<T> extends Set<T> {
-  #bitArray : Uint8Array;
-  #aSize : number;
-  #hashCount : number;
+  #bitArray: Uint8Array;
+  #aSize: number;
+  #hashCount: number;
   /**
    * Creates a new `BloomSet` instance.
    * @param iterable Optional: an iterable object with which to initialize the BloomSet.
@@ -67,7 +67,7 @@ export class BloomSet<T> extends Set<T> {
     options.hashCount ??= 7;
     options.size ??= 6553577;
 
-    let {size, hashCount} = options;
+    let { size, hashCount } = options;
 
     if (typeof size !== "number" || size <= 0) {
       size = 6553577; // Targeting < 1 collision per 100,000 elements, ~819 KB memory, needs 7 hashes
@@ -86,7 +86,7 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #findNextPrime(num : number) {
+  #findNextPrime(num: number) {
     if (num < 2) return 2;
     if (num % 2 === 0) num++; // Odd numbers only
 
@@ -98,7 +98,7 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #isPrime(num : number) {
+  #isPrime(num: number) {
     if (num < 2) return false;
     if (num === 2 || num === 3) return true;
     if (num % 2 === 0 || num % 3 === 0) return false;
@@ -112,7 +112,7 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #serialize(item : T | number | object) : string {
+  #serialize(item: T | number | object): string {
     if (typeof item === "number" && isNaN(item)) {
       return "NaN";
     }
@@ -133,8 +133,8 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #hashes(item : T) {
-    const hashes : number[] = [];
+  #hashes(item: T) {
+    const hashes: number[] = [];
     const str = this.#serialize(item);
     let hash = this.#fnv1a(str); // Base hash
 
@@ -152,7 +152,7 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #fnv1a(str : string) {
+  #fnv1a(str: string) {
     if (typeof str !== "string") {
       str = String(str);
     }
@@ -165,7 +165,7 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #setBits(hashes : number[]) : void {
+  #setBits(hashes: number[]): void {
     for (const hash of hashes) {
       const index = Math.floor(hash / 8);
       const bit = hash % 8;
@@ -174,7 +174,7 @@ export class BloomSet<T> extends Set<T> {
   }
 
   /** @internal */
-  #checkBits(hashes : number[]) : boolean {
+  #checkBits(hashes: number[]): boolean {
     for (const hash of hashes) {
       const index = Math.floor(hash / 8);
       const bit = hash % 8;
