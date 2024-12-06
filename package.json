@@ -1,6 +1,6 @@
 {
   "name": "@sepiariver/unique-set",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Extends the native Set class to deeply compare using fast-deep-equal, with optional Bloom filter optimization. This version exports 2 classes instead of a default, breaking b/c with version 1.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
