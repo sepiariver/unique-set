@@ -233,8 +233,217 @@ var MapSet = class {
     yield* this.values();
   }
 };
+var CuckooOverflowError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "CuckooOverflowError";
+  }
+};
+var CuckooSet = class extends Set {
+  #buckets;
+  #bucketSize;
+  // Maximum slots per bucket
+  #numBuckets;
+  // Total number of buckets
+  #fingerprintSize;
+  // Size of the fingerprint in bits
+  #maxRelocations;
+  // Maximum number of relocations before throwing an error
+  #silenceOverflow;
+  // Whether to throw an error on overflow
+  constructor(iterable = [], options = {}) {
+    super();
+    this.#bucketSize = options.bucketSize ?? 8;
+    this.#numBuckets = options.numBuckets ?? 1e5;
+    this.#fingerprintSize = options.fingerprintSize ?? 16;
+    this.#maxRelocations = options.maxRelocations ?? 100;
+    this.#silenceOverflow = options.silenceOverflow ?? false;
+    this.#buckets = /* @__PURE__ */ new Map();
+    for (let i = 0; i < this.#numBuckets; i++) {
+      this.#buckets.set(i, /* @__PURE__ */ new Set());
+    }
+    for (const item of iterable) {
+      this.add(item);
+    }
+  }
+  #getIdentifiers(o) {
+    const serialized = serialize(o);
+    const hash = fnv1a64(serialized);
+    const fingerprint = this.#fingerprint(hash);
+    const numBucketsBigInt = BigInt(this.#numBuckets);
+    const bucketIndex1 = Number(hash % numBucketsBigInt);
+    const bucketIndex2 = this.#getBucket2(bucketIndex1, fingerprint);
+    return { bucketIndex1, bucketIndex2, fingerprint, serialized };
+  }
+  #fingerprint(hash) {
+    const mask = (1n << BigInt(this.#fingerprintSize)) - 1n;
+    const fingerprint = hash & mask;
+    return fingerprint.toString(2);
+  }
+  #getBucket2(bucketIndex1, fingerprint) {
+    const bucketIndex1BigInt = BigInt(bucketIndex1);
+    const fingerprintBigInt = BigInt(`0b${fingerprint}`);
+    const bucketIndex2BigInt = (bucketIndex1BigInt ^ fingerprintBigInt) % BigInt(this.#numBuckets);
+    return Number(bucketIndex2BigInt);
+  }
+  /** Attempt to insert an item, evicting if necessary. */
+  #addWithEviction(insertionRecord) {
+    const added = this.#findAHome(insertionRecord);
+    if (added) {
+      return true;
+    } else {
+      const pending = [];
+      let doEviction = true;
+      while (doEviction) {
+        const candidate = this.#getEvictionCandidate(
+          insertionRecord.bucketIndex1
+        );
+        const relocated = this.#tryRelocation(candidate);
+        if (relocated) {
+          doEviction = false;
+        } else {
+          pending.push(candidate);
+          if (pending.length > this.#maxRelocations) {
+            return false;
+          }
+        }
+      }
+      for (let i = pending.length - 1; i >= 0; i--) {
+        const record = pending[i];
+        if (record && !this.#tryRelocation(record)) {
+          return false;
+        }
+      }
+      return this.#findAHome(insertionRecord);
+    }
+  }
+  #getEvictionCandidate(bucketIndex1) {
+    const bucket = this.#buckets.get(bucketIndex1);
+    const candidate = bucket.values().next().value;
+    const bucketIndex2 = this.#getBucket2(bucketIndex1, candidate);
+    return {
+      fingerprint: candidate,
+      bucketIndex1,
+      bucketIndex2
+    };
+  }
+  #tryRelocation(candidate) {
+    const { bucketIndex1, bucketIndex2, fingerprint } = candidate;
+    const bucket1 = this.#buckets.get(bucketIndex1);
+    const bucket2 = this.#buckets.get(bucketIndex2);
+    if (bucket1.has(fingerprint)) {
+      if (bucket2.size < this.#bucketSize || bucket2.has(fingerprint)) {
+        bucket2.add(fingerprint);
+        bucket1.delete(fingerprint);
+        return true;
+      }
+    } else if (bucket2.has(fingerprint)) {
+      if (bucket1.size < this.#bucketSize || bucket1.has(fingerprint)) {
+        bucket1.add(fingerprint);
+        bucket2.delete(fingerprint);
+        return true;
+      }
+    }
+    return false;
+  }
+  #findAHome(insertionRecord) {
+    const { bucketIndex1, bucketIndex2, fingerprint } = insertionRecord;
+    const bucket1 = this.#buckets.get(bucketIndex1);
+    if (bucket1 && // Set behavior: if the item is already in the bucket, it's a no-op
+    (bucket1.size < this.#bucketSize || bucket1.has(fingerprint))) {
+      bucket1.add(fingerprint);
+      return true;
+    }
+    const bucket2 = this.#buckets.get(bucketIndex2);
+    if (bucket2 && (bucket2.size < this.#bucketSize || bucket2.has(fingerprint))) {
+      bucket2.add(fingerprint);
+      return true;
+    }
+    return false;
+  }
+  #recordExists(record) {
+    const { bucketIndex1, bucketIndex2, fingerprint } = record;
+    return this.#buckets.get(bucketIndex1).has(fingerprint) || this.#buckets.get(bucketIndex2).has(fingerprint);
+  }
+  add(o) {
+    const record = this.#getIdentifiers(o);
+    const exists = this.#recordExists(record);
+    if (!exists) {
+      const added = this.#addWithEviction(record);
+      if (!added) {
+        const err = JSON.stringify({
+          message: "Failed to add item after maximum relocations",
+          bucketSize: this.#bucketSize,
+          numBuckets: this.#numBuckets,
+          fingerprintSize: this.#fingerprintSize,
+          maxRelocations: this.#maxRelocations
+        });
+        if (this.#silenceOverflow) {
+          console.error(err);
+          return this;
+        }
+        throw new CuckooOverflowError(err);
+      }
+      super.add(o);
+    }
+    return this;
+  }
+  /**
+   * Checks the Cuckoo filter for the presence of an object by value.
+   * @param o The object representing the value to check for presence.
+   * @returns True if an equivalent object is found, false otherwise.
+   */
+  hasByValue(o) {
+    const record = this.#getIdentifiers(o);
+    return this.#recordExists(record);
+  }
+  /**
+   * Adhere's the native Set's behavior, deleting objects by reference only.
+   * @param o The object to delete from the CuckooSet.
+   * @returns True if the object was found and deleted, false otherwise.
+   */
+  delete(o) {
+    const deleted = super.delete(o);
+    if (!deleted) {
+      return false;
+    }
+    const { bucketIndex1, bucketIndex2, fingerprint } = this.#getIdentifiers(o);
+    this.#buckets.get(bucketIndex1).delete(fingerprint);
+    this.#buckets.get(bucketIndex2).delete(fingerprint);
+    return true;
+  }
+  /**
+   * Deletes all objects from the CuckooSet that are equal to the input object.
+   * WARNING: this is expensive and should be used sparingly.
+   * @param o The object representing the value to delete.
+   * @returns True if any objects were deleted, false otherwise.
+   */
+  deleteByValue(o) {
+    const record = this.#getIdentifiers(o);
+    const exists = this.#recordExists(record);
+    if (!exists) {
+      return false;
+    }
+    const deletedReference = this.delete(o);
+    if (deletedReference) {
+      return true;
+    }
+    const { bucketIndex1, bucketIndex2, fingerprint } = record;
+    this.#buckets.get(bucketIndex1).delete(fingerprint);
+    this.#buckets.get(bucketIndex2).delete(fingerprint);
+    for (const item of this) {
+      if (equal(o, item)) {
+        super.delete(item);
+        return true;
+      }
+    }
+    return false;
+  }
+};
 export {
   BloomSet,
+  CuckooOverflowError,
+  CuckooSet,
   MapSet,
   UniqueSet,
   findNextPrime,
