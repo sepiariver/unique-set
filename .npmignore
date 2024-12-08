@@ -48,3 +48,9 @@ temp*.*js
 
 # github
 .github
+
+# macOS
+.DS_Store
+
+# VSCode
+.vscode/
