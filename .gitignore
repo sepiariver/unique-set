@@ -40,3 +40,6 @@ jspm_packages/
 
 # macOS
 .DS_Store
+
+# VSCode
+.vscode/
