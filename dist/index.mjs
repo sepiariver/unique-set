@@ -26,8 +26,8 @@ var fnv1a = (str) => {
 };
 var findNextPrime = (num) => {
   if (num < 2) return 2;
-  if (num % 2 === 0) num++;
-  while (isPrime(num)) {
+  if ((num & 1) === 0) num++;
+  while (!isPrime(num)) {
     num += 2;
   }
   return num;
@@ -35,8 +35,9 @@ var findNextPrime = (num) => {
 var isPrime = (num) => {
   if (num < 2) return false;
   if (num === 2 || num === 3) return true;
-  if (num % 2 === 0 || num % 3 === 0) return false;
-  const sqrt = Math.floor(Math.sqrt(num));
+  if ((num & 1) === 0) return false;
+  if (num % 3 === 0) return false;
+  const sqrt = Math.sqrt(num);
   for (let i = 5; i <= sqrt; i += 6) {
     if (num % i === 0 || num % (i + 2) === 0) return false;
   }
