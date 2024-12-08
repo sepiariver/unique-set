@@ -35,22 +35,22 @@ const fnv1a = (str: string) => {
 
 const findNextPrime = (num: number) => {
   if (num < 2) return 2;
-  if (num % 2 === 0) num++; // Odd numbers only
+  if ((num & 1) === 0) num++; // Odd numbers only
 
-  while (isPrime(num)) {
+  while (!isPrime(num)) {
     num += 2; // Odd numbers only
   }
 
   return num;
 };
 
-/** @internal */
-const isPrime = (num: number) => {
+const isPrime = (num: number): boolean => {
   if (num < 2) return false;
   if (num === 2 || num === 3) return true;
-  if (num % 2 === 0 || num % 3 === 0) return false;
+  if ((num & 1) === 0) return false;
+  if (num % 3 === 0) return false;
 
-  const sqrt = Math.floor(Math.sqrt(num));
+  const sqrt = Math.sqrt(num);
   for (let i = 5; i <= sqrt; i += 6) {
     if (num % i === 0 || num % (i + 2) === 0) return false;
   }
