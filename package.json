@@ -1,7 +1,7 @@
 {
   "name": "@sepiariver/unique-set",
-  "version": "2.1.0",
-  "description": "Extends the native Set class to deeply compare using fast-deep-equal, with optional Bloom filter optimization. This version exports 2 classes instead of a default, breaking b/c with version 1.",
+  "version": "3.0.0",
+  "description": "A Set-like collection that deduplicates by deep value equality using a streaming structural hash and fast-deep-equal.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.mts",
@@ -23,10 +23,10 @@
   "keywords": [
     "Set",
     "unique",
-    "bloom",
     "deep",
     "compare",
-    "equal"
+    "equal",
+    "hash"
   ],
   "author": "sepiariver",
   "license": "MIT",

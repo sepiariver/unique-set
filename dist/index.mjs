@@ -1,244 +1,159 @@
 // index.ts
 import equal from "fast-deep-equal/es6/index.js";
-var serialize = (item) => {
-  if (typeof item === "number") {
-    if (isNaN(item)) {
-      return "NaN";
-    }
-    return String(item);
-  }
-  if (item && typeof item === "object") {
-    if (Array.isArray(item)) {
-      return `[${item.map(serialize).join(",")}]`;
-    } else if (item instanceof Map) {
-      return `${Array.from(item.entries()).sort(([a], [b]) => String(a).localeCompare(String(b))).map(([k, v]) => `${serialize(k)}:${serialize(v)}`).join(".")}`;
-    } else if (item instanceof Set) {
-      return `${Array.from(item.entries()).map(([k, v]) => `${serialize(k)}:${serialize(v)}`).join("|")}`;
-    } else {
-      return `{${Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${serialize(v)}`).join(";")}}`;
-    }
-  }
-  return String(item);
+var _f64 = new Float64Array(1);
+var _u8 = new Uint8Array(_f64.buffer);
+var structuralHash = (value) => {
+  return _shash(value, 2166136261) >>> 0;
 };
-var fnv1a = (str) => {
-  if (typeof str !== "string") {
-    str = String(str);
-  }
-  let hash = 2166136261;
+var _mix = (hash, byte) => {
+  return Math.imul(hash ^ byte, 16777619);
+};
+var _mixStr = (hash, str) => {
   for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = hash * 16777619 >>> 0;
+    hash = Math.imul(hash ^ str.charCodeAt(i), 16777619);
   }
-  return hash >>> 0;
+  return hash;
 };
-var fnv1a64 = (str) => {
-  if (typeof str !== "string") {
-    str = String(str);
+var _shash = (value, hash) => {
+  if (value === null) return _mix(hash, 0);
+  if (value === void 0) return _mix(hash, 1);
+  switch (typeof value) {
+    case "boolean":
+      return _mix(hash, value ? 3 : 2);
+    case "number":
+      hash = _mix(hash, 5);
+      if (isNaN(value)) return _mix(hash, 4);
+      if (value === 0) return _mix(hash, 48);
+      _f64[0] = value;
+      for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]);
+      return hash;
+    case "string":
+      hash = _mix(hash, 6);
+      return _mixStr(hash, value);
+    case "bigint":
+      hash = _mix(hash, 7);
+      return _mixStr(hash, value.toString());
+    case "function":
+    case "symbol":
+      hash = _mix(hash, 8);
+      return _mixStr(hash, String(value));
+    default:
+      break;
   }
-  const PRIME = BigInt(1099511628211);
-  let hash = BigInt(14695981039346655e3);
-  for (let i = 0; i < str.length; i++) {
-    hash ^= BigInt(str.charCodeAt(i));
-    hash *= PRIME;
+  if (Array.isArray(value)) {
+    hash = _mix(hash, 16);
+    for (let i = 0; i < value.length; i++) hash = _shash(value[i], hash);
+    return hash;
   }
-  return hash & BigInt("0xFFFFFFFFFFFFFFFF");
-};
-var findNextPrime = (num) => {
-  if (num < 2) return 2;
-  if ((num & 1) === 0) num++;
-  while (!isPrime(num)) {
-    num += 2;
+  if (value instanceof Map) {
+    hash = _mix(hash, 17);
+    const entries = Array.from(value.entries()).sort(
+      ([a], [b]) => String(a).localeCompare(String(b))
+    );
+    for (const [k, v] of entries) {
+      hash = _shash(k, hash);
+      hash = _shash(v, hash);
+    }
+    return hash;
   }
-  return num;
-};
-var isPrime = (num) => {
-  if (num < 2) return false;
-  if (num === 2 || num === 3) return true;
-  if ((num & 1) === 0) return false;
-  if (num % 3 === 0) return false;
-  const sqrt = Math.sqrt(num);
-  for (let i = 5; i <= sqrt; i += 6) {
-    if (num % i === 0 || num % (i + 2) === 0) return false;
+  if (value instanceof Set) {
+    hash = _mix(hash, 18);
+    for (const v of value) hash = _shash(v, hash);
+    return hash;
   }
-  return true;
-};
-var UniqueSet = class extends Set {
-  /*** @throws TypeError If the input is not iterable. */
-  constructor(iterable = []) {
-    if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
-      throw new TypeError("UniqueSet requires an iterable");
-    }
-    super();
-    for (const item of iterable) {
-      this.add(item);
-    }
+  if (value instanceof Date) {
+    hash = _mix(hash, 20);
+    _f64[0] = value.getTime();
+    for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]);
+    return hash;
   }
-  /**
-   * Determines whether an object is in the UniqueSet using deep equality.
-   * @param o The object to check for presence in the UniqueSet.
-   * @returns `true` if the object is found, `false` otherwise.
-   */
-  has(o) {
-    for (const i of this) {
-      if (equal(o, i)) {
-        return true;
-      }
-    }
-    return false;
+  if (value instanceof RegExp) {
+    hash = _mix(hash, 21);
+    return _mixStr(hash, value.toString());
   }
-  /**
-   * Adds a new object to the UniqueSet if it is not already present.
-   * @param o The object to add to the UniqueSet.
-   * @returns The `UniqueSet` instance, allowing for chaining.
-   */
-  add(o) {
-    if (!this.has(o)) {
-      super.add(o);
-    }
-    return this;
+  hash = _mix(hash, 19);
+  const keys = Object.keys(value).sort();
+  for (const key of keys) {
+    hash = _mixStr(hash, key);
+    hash = _shash(value[key], hash);
   }
-};
-var BloomSet = class extends Set {
-  #bitArray;
-  #aSize;
-  #hashCount;
-  /**
-   * Creates a new `BloomSet` instance.
-   * @param iterable Optional: an iterable object with which to initialize the BloomSet.
-   * @param options Bloom filter configuration options.
-   * @param options.size The size of the Bloom filter's bit array. Defaults to 6553577.
-   * @param options.hashCount The number of hash functions to use. Defaults to 7.
-   * @throws TypeError If the input is not iterable.
-   */
-  constructor(iterable = [], options = {}) {
-    if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
-      throw new TypeError("BloomSet requires an iterable");
-    }
-    super();
-    if (!options || typeof options !== "object") {
-      options = {};
-    }
-    options.hashCount ??= 7;
-    options.size ??= 6553577;
-    let { size, hashCount } = options;
-    if (typeof size !== "number" || size <= 0) {
-      size = 6553577;
-    }
-    this.#aSize = findNextPrime(size);
-    if (typeof hashCount !== "number" || hashCount <= 0) {
-      hashCount = 7;
-    }
-    this.#hashCount = hashCount;
-    this.#bitArray = new Uint8Array(Math.ceil(size / 8));
-    for (const item of iterable) {
-      this.add(item);
-    }
-  }
-  /** @internal */
-  #hashes(item) {
-    const hashes = [];
-    const str = serialize(item);
-    let hash = fnv1a(str);
-    for (let i = 0; i < this.#hashCount; i++) {
-      hash %= this.#aSize;
-      hashes.push(hash);
-      hash = (hash ^ hash >>> 13) * 3266489909;
-      hash >>>= 0;
-    }
-    return hashes;
-  }
-  /** @internal */
-  #setBits(hashes) {
-    for (const hash of hashes) {
-      const index = Math.floor(hash / 8);
-      const bit = hash % 8;
-      this.#bitArray[index] |= 1 << bit;
-    }
-  }
-  /** @internal */
-  #checkBits(hashes) {
-    for (const hash of hashes) {
-      const index = Math.floor(hash / 8);
-      const bit = hash % 8;
-      if (!(this.#bitArray[index] & 1 << bit)) {
-        return false;
-      }
-    }
-    return true;
-  }
-  /** Determines existence of an object in the BloomSet using the Bloom filter and deep equality */
-  has(o) {
-    const hashes = this.#hashes(o);
-    if (!this.#checkBits(hashes)) {
-      return false;
-    }
-    for (const i of this) {
-      if (equal(o, i)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  /** Adds a new object to the BloomSet if it is not already present.
-   * @returns The `BloomSet` instance, allowing for chaining.
-   */
-  add(o) {
-    if (!this.has(o)) {
-      const hashes = this.#hashes(o);
-      this.#setBits(hashes);
-      super.add(o);
-    }
-    return this;
-  }
+  return hash;
 };
 var MapSet = class {
   #map;
-  #hashFn;
-  constructor(iterable = [], options = {}) {
-    const { hashFunction } = options;
+  #size;
+  constructor(iterable = []) {
+    if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
+      throw new TypeError("MapSet requires an iterable");
+    }
     this.#map = /* @__PURE__ */ new Map();
-    this.#hashFn = hashFunction && typeof hashFunction === "function" ? hashFunction : (value) => fnv1a64(serialize(value));
+    this.#size = 0;
     for (const item of iterable) {
       this.add(item);
     }
   }
   add(value) {
-    const hash = this.#hashFn(value);
-    if (!this.#map.has(hash)) {
-      this.#map.set(hash, value);
+    const hash = structuralHash(value);
+    const bucket = this.#map.get(hash);
+    if (!bucket) {
+      this.#map.set(hash, [value]);
+      this.#size++;
+    } else {
+      for (const item of bucket) {
+        if (equal(value, item)) return this;
+      }
+      bucket.push(value);
+      this.#size++;
     }
     return this;
   }
   has(value) {
-    const hash = this.#hashFn(value);
-    return this.#map.has(hash);
+    const hash = structuralHash(value);
+    const bucket = this.#map.get(hash);
+    if (!bucket) return false;
+    for (const item of bucket) {
+      if (equal(value, item)) return true;
+    }
+    return false;
   }
   delete(value) {
-    const hash = this.#hashFn(value);
-    return this.#map.delete(hash);
+    const hash = structuralHash(value);
+    const bucket = this.#map.get(hash);
+    if (!bucket) return false;
+    for (let i = 0; i < bucket.length; i++) {
+      if (equal(value, bucket[i])) {
+        bucket.splice(i, 1);
+        if (bucket.length === 0) this.#map.delete(hash);
+        this.#size--;
+        return true;
+      }
+    }
+    return false;
   }
   get size() {
-    return this.#map.size;
+    return this.#size;
   }
   clear() {
     this.#map.clear();
+    this.#size = 0;
   }
   forEach(callback, thisArg) {
-    this.#map.forEach((value) => callback.call(thisArg, value, value, this));
+    for (const bucket of this.#map.values()) {
+      for (const value of bucket) {
+        callback.call(thisArg, value, value, this);
+      }
+    }
   }
   *values() {
-    yield* this.#map.values();
+    for (const bucket of this.#map.values()) {
+      yield* bucket;
+    }
   }
   *[Symbol.iterator]() {
     yield* this.values();
   }
 };
 export {
-  BloomSet,
   MapSet,
-  UniqueSet,
-  findNextPrime,
-  fnv1a,
-  fnv1a64,
-  serialize
+  structuralHash
 };
