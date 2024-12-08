@@ -10,7 +10,7 @@ interface Dataset {
 function generateDataset(size: number): Dataset {
   const data = [];
   const limit = size * 2;
-  const factor = 0.00001; // 0.001: 0.99% duplicates; 0.0001: 8.5%; 0.00001: 14.3%
+  const factor = 0.001; // 0.001: 0.99% duplicates; 0.0001: 8.5%; 0.00001: 14.3%
   const prime1 = findNextPrime(Math.floor(size * factor));
   const prime2 = findNextPrime(prime1);
   const prime3 = findNextPrime(prime2);
@@ -81,7 +81,7 @@ function generateDataset(size: number): Dataset {
   return { data, expectedDupes };
 }
 
-describe("Performance Benchmarks - Nested Data 100K", () => {
+describe("Performance Benchmarks - Nested Data 100k to Millions", () => {
   const datasetConfigs = {
     //100000: { hashCount: 7, size: 6553577 },
     //100000: { hashCount: 1, size: 28755000 },
@@ -167,7 +167,6 @@ describe("Performance Benchmarks - Nested Data 100K", () => {
 
       const cuckoo = new CuckooSet([], {
         numBuckets: dataSize,
-        fingerprintSize: 24,
       });
       const native = new Set();
 

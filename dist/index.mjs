@@ -62,6 +62,19 @@ var isPrime = (num) => {
   }
   return true;
 };
+var isValidNumberArg = (n) => {
+  return Boolean(Number.isInteger(n) && n > 0);
+};
+var findExponentForSize = (n, ratio) => {
+  if (!isValidNumberArg(n)) {
+    n = 1;
+  }
+  if (!isValidNumberArg(ratio)) {
+    ratio = 4;
+  }
+  const target = ratio * n;
+  return Math.ceil(Math.log2(target));
+};
 var UniqueSet = class extends Set {
   /*** @throws TypeError If the input is not iterable. */
   constructor(iterable = []) {
@@ -195,6 +208,9 @@ var MapSet = class {
   #map;
   #hashFn;
   constructor(iterable = [], options = {}) {
+    if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
+      throw new TypeError("MapSet requires an iterable");
+    }
     const { hashFunction } = options;
     this.#map = /* @__PURE__ */ new Map();
     this.#hashFn = hashFunction && typeof hashFunction === "function" ? hashFunction : (value) => fnv1a64(serialize(value));
@@ -240,28 +256,32 @@ var CuckooOverflowError = class extends Error {
   }
 };
 var CuckooSet = class extends Set {
+  // Array of buckets, each a Set of fingerprints
   #buckets;
+  // Maximum slots per bucket. Cannot change after initialization. 8 seems a good default.
   #bucketSize;
-  // Maximum slots per bucket
+  // Total number of buckets. Recommend max number of expected elements. Cannot change after initialization.
   #numBuckets;
-  // Total number of buckets
+  // Fingerprint size in bits. Critical for collision resistance. Default to exponent of 2 >= 5x #numBuckets.
   #fingerprintSize;
-  // Size of the fingerprint in bits
-  #maxRelocations;
   // Maximum number of relocations before throwing an error
+  #maxRelocations;
+  // Whether to throw an error on overflow. Should almost always be false: do throw.
   #silenceOverflow;
-  // Whether to throw an error on overflow
   constructor(iterable = [], options = {}) {
-    super();
-    this.#bucketSize = options.bucketSize ?? 8;
-    this.#numBuckets = options.numBuckets ?? 1e5;
-    this.#fingerprintSize = options.fingerprintSize ?? 16;
-    this.#maxRelocations = options.maxRelocations ?? 100;
-    this.#silenceOverflow = options.silenceOverflow ?? false;
-    this.#buckets = /* @__PURE__ */ new Map();
-    for (let i = 0; i < this.#numBuckets; i++) {
-      this.#buckets.set(i, /* @__PURE__ */ new Set());
+    if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
+      throw new TypeError("CuckooSet requires an iterable");
     }
+    super();
+    const { bucketSize, numBuckets, fingerprintSize, maxRelocations } = options;
+    this.#bucketSize = isValidNumberArg(bucketSize) ? bucketSize : 8;
+    this.#numBuckets = isValidNumberArg(numBuckets) ? numBuckets : 2e4;
+    const exp = findExponentForSize(this.#numBuckets, 3);
+    console.log("exp", exp);
+    this.#fingerprintSize = isValidNumberArg(fingerprintSize) ? fingerprintSize : Math.max(20, exp);
+    this.#maxRelocations = isValidNumberArg(maxRelocations) ? maxRelocations : 100;
+    this.#silenceOverflow = options.silenceOverflow ?? false;
+    this.#buckets = Array(this.#numBuckets).fill(null);
     for (const item of iterable) {
       this.add(item);
     }
@@ -272,7 +292,7 @@ var CuckooSet = class extends Set {
     const fingerprint = this.#fingerprint(hash);
     const numBucketsBigInt = BigInt(this.#numBuckets);
     const bucketIndex1 = Number(hash % numBucketsBigInt);
-    const bucketIndex2 = this.#getBucket2(bucketIndex1, fingerprint);
+    const bucketIndex2 = this.#getBucketIndex2(bucketIndex1, fingerprint);
     return { bucketIndex1, bucketIndex2, fingerprint, serialized };
   }
   #fingerprint(hash) {
@@ -280,7 +300,13 @@ var CuckooSet = class extends Set {
     const fingerprint = hash & mask;
     return fingerprint.toString(2);
   }
-  #getBucket2(bucketIndex1, fingerprint) {
+  #getBucket(bucketIndex) {
+    if (!this.#buckets[bucketIndex]) {
+      this.#buckets[bucketIndex] = /* @__PURE__ */ new Set();
+    }
+    return this.#buckets[bucketIndex];
+  }
+  #getBucketIndex2(bucketIndex1, fingerprint) {
     const bucketIndex1BigInt = BigInt(bucketIndex1);
     const fingerprintBigInt = BigInt(`0b${fingerprint}`);
     const bucketIndex2BigInt = (bucketIndex1BigInt ^ fingerprintBigInt) % BigInt(this.#numBuckets);
@@ -318,9 +344,9 @@ var CuckooSet = class extends Set {
     }
   }
   #getEvictionCandidate(bucketIndex1) {
-    const bucket = this.#buckets.get(bucketIndex1);
+    const bucket = this.#getBucket(bucketIndex1);
     const candidate = bucket.values().next().value;
-    const bucketIndex2 = this.#getBucket2(bucketIndex1, candidate);
+    const bucketIndex2 = this.#getBucketIndex2(bucketIndex1, candidate);
     return {
       fingerprint: candidate,
       bucketIndex1,
@@ -329,8 +355,8 @@ var CuckooSet = class extends Set {
   }
   #tryRelocation(candidate) {
     const { bucketIndex1, bucketIndex2, fingerprint } = candidate;
-    const bucket1 = this.#buckets.get(bucketIndex1);
-    const bucket2 = this.#buckets.get(bucketIndex2);
+    const bucket1 = this.#getBucket(bucketIndex1);
+    const bucket2 = this.#getBucket(bucketIndex2);
     if (bucket1.has(fingerprint)) {
       if (bucket2.size < this.#bucketSize || bucket2.has(fingerprint)) {
         bucket2.add(fingerprint);
@@ -348,13 +374,13 @@ var CuckooSet = class extends Set {
   }
   #findAHome(insertionRecord) {
     const { bucketIndex1, bucketIndex2, fingerprint } = insertionRecord;
-    const bucket1 = this.#buckets.get(bucketIndex1);
+    const bucket1 = this.#getBucket(bucketIndex1);
     if (bucket1 && // Set behavior: if the item is already in the bucket, it's a no-op
     (bucket1.size < this.#bucketSize || bucket1.has(fingerprint))) {
       bucket1.add(fingerprint);
       return true;
     }
-    const bucket2 = this.#buckets.get(bucketIndex2);
+    const bucket2 = this.#getBucket(bucketIndex2);
     if (bucket2 && (bucket2.size < this.#bucketSize || bucket2.has(fingerprint))) {
       bucket2.add(fingerprint);
       return true;
@@ -363,7 +389,7 @@ var CuckooSet = class extends Set {
   }
   #recordExists(record) {
     const { bucketIndex1, bucketIndex2, fingerprint } = record;
-    return this.#buckets.get(bucketIndex1).has(fingerprint) || this.#buckets.get(bucketIndex2).has(fingerprint);
+    return this.#getBucket(bucketIndex1).has(fingerprint) || this.#getBucket(bucketIndex2).has(fingerprint);
   }
   add(o) {
     const record = this.#getIdentifiers(o);
@@ -408,8 +434,8 @@ var CuckooSet = class extends Set {
       return false;
     }
     const { bucketIndex1, bucketIndex2, fingerprint } = this.#getIdentifiers(o);
-    this.#buckets.get(bucketIndex1).delete(fingerprint);
-    this.#buckets.get(bucketIndex2).delete(fingerprint);
+    this.#getBucket(bucketIndex1).delete(fingerprint);
+    this.#getBucket(bucketIndex2).delete(fingerprint);
     return true;
   }
   /**
@@ -429,8 +455,8 @@ var CuckooSet = class extends Set {
       return true;
     }
     const { bucketIndex1, bucketIndex2, fingerprint } = record;
-    this.#buckets.get(bucketIndex1).delete(fingerprint);
-    this.#buckets.get(bucketIndex2).delete(fingerprint);
+    this.#getBucket(bucketIndex1).delete(fingerprint);
+    this.#getBucket(bucketIndex2).delete(fingerprint);
     for (const item of this) {
       if (equal(o, item)) {
         super.delete(item);
