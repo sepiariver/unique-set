@@ -1,4 +1,4 @@
-import { BloomSet, UniqueSet } from "../dist/index.mjs";
+import { BloomSet, MapSet, UniqueSet } from "../dist/index.mjs";
 import { performance } from "perf_hooks";
 import { describe, it, expect, test } from "vitest";
 
@@ -206,6 +206,65 @@ describe("Performance Benchmarks - Nested Data", () => {
         "Expected size: " + expectedSize
       );
       expect(bloom.size).toBe(expectedSize);
+
+      console.log(
+        "Native Set size: " + native.size,
+        "Expected size: " + expectedNativeSize
+      );
+      // Native Set will not deduplicate deeply nested structures
+      expect(native.size).toBe(expectedNativeSize);
+    });
+
+    it("MapSet vs native Set: " + String(datasetSize), () => {
+      console.log(
+        "Performance test: MapSet vs native Set" + String(datasetSize)
+      );
+
+      const map = new MapSet();
+      const native = new Set();
+
+      // Measure MapSet
+      performance.mark("map-start" + String(datasetSize));
+      for (let i = 0; i < iterations; i++) {
+        // @ts-ignore
+        data.forEach((el) => map.add(el));
+      }
+      performance.mark("map-end" + String(datasetSize));
+      performance.measure(
+        "map" + String(datasetSize),
+        "map-start" + String(datasetSize),
+        "map-end" + String(datasetSize)
+      );
+
+      // Measure native Set
+      performance.mark("native-start" + String(datasetSize));
+      for (let i = 0; i < iterations; i++) {
+        data.forEach((el) => native.add(el));
+      }
+      performance.mark("native-end" + String(datasetSize));
+      performance.measure(
+        "native" + String(datasetSize),
+        "native-start" + String(datasetSize),
+        "native-end" + String(datasetSize)
+      );
+
+      // @ts-ignore
+      const mapTime = performance.getEntriesByName(
+        "map" + String(datasetSize)
+      )[0].duration;
+      // @ts-ignore
+      const nativeTime = performance.getEntriesByName(
+        "native" + String(datasetSize)
+      )[1].duration;
+
+      console.log(`MapSet execution time: ${mapTime.toFixed(2)} ms`);
+      console.log(`Native Set execution time: ${nativeTime.toFixed(2)} ms`);
+
+      expect(nativeTime).toBeLessThan(mapTime);
+      expect(mapTime).toBeLessThan(uniqueTiming);
+
+      console.log("MapSet size: " + map.size, "Expected size: " + expectedSize);
+      expect(map.size).toBe(expectedSize);
 
       console.log(
         "Native Set size: " + native.size,
