@@ -1,3 +1,8 @@
+/** Utility functions */
+declare const serialize: (item: any | number | object) => string;
+declare const fnv1a: (str: string) => number;
+declare const fnv1a64: (str: string) => bigint;
+declare const findNextPrime: (num: number) => number;
 /** A `Set` extension that ensures uniqueness of items using deep equality checks. */
 declare class UniqueSet<T> extends Set<T> {
     /*** @throws TypeError If the input is not iterable. */
@@ -37,5 +42,19 @@ declare class BloomSet<T> extends Set<T> {
      */
     add(o: T): this;
 }
+declare class MapSet<T> {
+    #private;
+    constructor(iterable?: Iterable<T>, options?: {
+        hashFunction?: (value: T) => number | bigint;
+    });
+    add(value: T): this;
+    has(value: T): boolean;
+    delete(value: T): boolean;
+    get size(): number;
+    clear(): void;
+    forEach(callback: (value: T, valueAgain: T, set: this) => void, thisArg?: any): void;
+    values(): IterableIterator<T>;
+    [Symbol.iterator](): IterableIterator<T>;
+}
 
-export { BloomSet, UniqueSet };
+export { BloomSet, MapSet, UniqueSet, findNextPrime, fnv1a, fnv1a64, serialize };

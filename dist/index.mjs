@@ -1,14 +1,21 @@
 // index.ts
 import equal from "fast-deep-equal/es6/index.js";
 var serialize = (item) => {
-  if (typeof item === "number" && isNaN(item)) {
-    return "NaN";
+  if (typeof item === "number") {
+    if (isNaN(item)) {
+      return "NaN";
+    }
+    return String(item);
   }
   if (item && typeof item === "object") {
     if (Array.isArray(item)) {
-      return `[${item.map(serialize).join("")}]`;
+      return `[${item.map(serialize).join(",")}]`;
+    } else if (item instanceof Map) {
+      return `${Array.from(item.entries()).sort(([a], [b]) => String(a).localeCompare(String(b))).map(([k, v]) => `${serialize(k)}:${serialize(v)}`).join(".")}`;
+    } else if (item instanceof Set) {
+      return `${Array.from(item.entries()).map(([k, v]) => `${serialize(k)}:${serialize(v)}`).join("|")}`;
     } else {
-      return `{${Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${serialize(v)}`).join("")}}`;
+      return `{${Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}:${serialize(v)}`).join(";")}}`;
     }
   }
   return String(item);
@@ -23,6 +30,18 @@ var fnv1a = (str) => {
     hash = hash * 16777619 >>> 0;
   }
   return hash >>> 0;
+};
+var fnv1a64 = (str) => {
+  if (typeof str !== "string") {
+    str = String(str);
+  }
+  const PRIME = BigInt(1099511628211);
+  let hash = BigInt(14695981039346655e3);
+  for (let i = 0; i < str.length; i++) {
+    hash ^= BigInt(str.charCodeAt(i));
+    hash *= PRIME;
+  }
+  return hash & BigInt("0xFFFFFFFFFFFFFFFF");
 };
 var findNextPrime = (num) => {
   if (num < 2) return 2;
@@ -172,7 +191,54 @@ var BloomSet = class extends Set {
     return this;
   }
 };
+var MapSet = class {
+  #map;
+  #hashFn;
+  constructor(iterable = [], options = {}) {
+    const { hashFunction } = options;
+    this.#map = /* @__PURE__ */ new Map();
+    this.#hashFn = hashFunction && typeof hashFunction === "function" ? hashFunction : (value) => fnv1a64(serialize(value));
+    for (const item of iterable) {
+      this.add(item);
+    }
+  }
+  add(value) {
+    const hash = this.#hashFn(value);
+    if (!this.#map.has(hash)) {
+      this.#map.set(hash, value);
+    }
+    return this;
+  }
+  has(value) {
+    const hash = this.#hashFn(value);
+    return this.#map.has(hash);
+  }
+  delete(value) {
+    const hash = this.#hashFn(value);
+    return this.#map.delete(hash);
+  }
+  get size() {
+    return this.#map.size;
+  }
+  clear() {
+    this.#map.clear();
+  }
+  forEach(callback, thisArg) {
+    this.#map.forEach((value) => callback.call(thisArg, value, value, this));
+  }
+  *values() {
+    yield* this.#map.values();
+  }
+  *[Symbol.iterator]() {
+    yield* this.values();
+  }
+};
 export {
   BloomSet,
-  UniqueSet
+  MapSet,
+  UniqueSet,
+  findNextPrime,
+  fnv1a,
+  fnv1a64,
+  serialize
 };

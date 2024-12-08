@@ -2,26 +2,40 @@ import equal from "fast-deep-equal/es6/index.js";
 
 /** Utility functions */
 
-const serialize = (item: any | number | object): string => {
-  if (typeof item === "number" && isNaN(item)) {
-    return "NaN";
+export const serialize = (item: any | number | object): string => {
+  if (typeof item === "number") {
+    if (isNaN(item)) {
+      return "NaN";
+    }
+    // We might decide we want to flag numeric strings vs numbers
+    return String(item);
   }
 
   if (item && typeof item === "object") {
     if (Array.isArray(item)) {
-      return `[${item.map(serialize).join("")}]`;
+      return `[${item.map(serialize).join(",")}]`;
+    } else if (item instanceof Map) {
+      return `${Array.from(item.entries())
+        .sort(([a], [b]) => String(a).localeCompare(String(b)))
+        .map(([k, v]) => `${serialize(k)}:${serialize(v)}`)
+        .join(".")}`;
+    } else if (item instanceof Set) {
+      return `${Array.from(item.entries())
+        .map(([k, v]) => `${serialize(k)}:${serialize(v)}`)
+        .join("|")}`;
     } else {
       return `{${Object.entries(item)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([k, v]) => `${k}:${serialize(v)}`)
-        .join("")}}`;
+        .join(";")}}`;
     }
   }
 
+  // Call toString on everything else, including Date, RegExp, undefined, null, etc.
   return String(item);
 };
 
-const fnv1a = (str: string) => {
+export const fnv1a = (str: string): number => {
   if (typeof str !== "string") {
     str = String(str);
   }
@@ -33,7 +47,20 @@ const fnv1a = (str: string) => {
   return hash >>> 0;
 };
 
-const findNextPrime = (num: number) => {
+export const fnv1a64 = (str: string): bigint => {
+  if (typeof str !== "string") {
+    str = String(str);
+  }
+  const PRIME = BigInt(1099511628211); // Instantiate FNV 64-bit prime as BigInt
+  let hash = BigInt(14695981039346656037); // FNV offset basis for 64-bit
+  for (let i = 0; i < str.length; i++) {
+    hash ^= BigInt(str.charCodeAt(i));
+    hash *= PRIME;
+  }
+  return hash & BigInt("0xFFFFFFFFFFFFFFFF"); // Ensure it's 64-bit
+};
+
+export const findNextPrime = (num: number) => {
   if (num < 2) return 2;
   if ((num & 1) === 0) num++; // Odd numbers only
 
@@ -206,5 +233,67 @@ export class BloomSet<T> extends Set<T> {
       super.add(o);
     }
     return this;
+  }
+}
+
+export class MapSet<T> {
+  #map: Map<number | bigint, T>;
+  #hashFn: (value: T) => number | bigint;
+
+  constructor(
+    iterable: Iterable<T> = [],
+    options: { hashFunction?: (value: T) => number | bigint } = {}
+  ) {
+    const { hashFunction } = options;
+    this.#map = new Map();
+    this.#hashFn =
+      hashFunction && typeof hashFunction === "function"
+        ? hashFunction
+        : (value) => fnv1a64(serialize(value));
+
+    for (const item of iterable) {
+      this.add(item);
+    }
+  }
+
+  add(value: T): this {
+    const hash = this.#hashFn(value);
+    if (!this.#map.has(hash)) {
+      this.#map.set(hash, value);
+    }
+    return this;
+  }
+
+  has(value: T): boolean {
+    const hash = this.#hashFn(value);
+    return this.#map.has(hash);
+  }
+
+  delete(value: T): boolean {
+    const hash = this.#hashFn(value);
+    return this.#map.delete(hash);
+  }
+
+  get size(): number {
+    return this.#map.size;
+  }
+
+  clear(): void {
+    this.#map.clear();
+  }
+
+  forEach(
+    callback: (value: T, valueAgain: T, set: this) => void,
+    thisArg?: any
+  ): void {
+    this.#map.forEach((value) => callback.call(thisArg, value, value, this));
+  }
+
+  *values(): IterableIterator<T> {
+    yield* this.#map.values();
+  }
+
+  *[Symbol.iterator](): IterableIterator<T> {
+    yield* this.values();
   }
 }
