@@ -367,7 +367,7 @@ export class CuckooSet<T> extends Set<T> {
     const exp = findExponentForSize(this.#numBuckets, 3);
     this.#fingerprintSize = isValidNumberArg(fingerprintSize)
       ? fingerprintSize!
-      : Math.max(20, exp); // 20 is the minimum recommended fingerprint size
+      : Math.max(24, exp); // 24 is the minimum recommended fingerprint size
     this.#maxRelocations = isValidNumberArg(maxRelocations)
       ? maxRelocations!
       : 100;

@@ -277,8 +277,7 @@ var CuckooSet = class extends Set {
     this.#bucketSize = isValidNumberArg(bucketSize) ? bucketSize : 8;
     this.#numBuckets = isValidNumberArg(numBuckets) ? numBuckets : 2e4;
     const exp = findExponentForSize(this.#numBuckets, 3);
-    console.log("exp", exp);
-    this.#fingerprintSize = isValidNumberArg(fingerprintSize) ? fingerprintSize : Math.max(20, exp);
+    this.#fingerprintSize = isValidNumberArg(fingerprintSize) ? fingerprintSize : Math.max(24, exp);
     this.#maxRelocations = isValidNumberArg(maxRelocations) ? maxRelocations : 100;
     this.#silenceOverflow = options.silenceOverflow ?? false;
     this.#buckets = Array(this.#numBuckets).fill(null);

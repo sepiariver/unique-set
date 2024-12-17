@@ -1,4 +1,4 @@
-import { BloomSet, MapSet, UniqueSet } from "../dist/index.mjs";
+import { BloomSet, CuckooSet, MapSet, UniqueSet } from "../dist/index.mjs";
 import { performance } from "perf_hooks";
 import { describe, it, expect, test } from "vitest";
 
@@ -206,6 +206,68 @@ describe("Performance Benchmarks - Nested Data", () => {
         "Expected size: " + expectedSize
       );
       expect(bloom.size).toBe(expectedSize);
+
+      console.log(
+        "Native Set size: " + native.size,
+        "Expected size: " + expectedNativeSize
+      );
+      // Native Set will not deduplicate deeply nested structures
+      expect(native.size).toBe(expectedNativeSize);
+    });
+
+    it("CuckooSet vs native Set: " + String(datasetSize), () => {
+      console.log(
+        "Performance test: CuckooSet vs native Set" + String(datasetSize)
+      );
+
+      const cuckoo = new CuckooSet();
+      const native = new Set();
+
+      // Measure CuckooSet
+      performance.mark("cuckoo-start" + String(datasetSize));
+      for (let i = 0; i < iterations; i++) {
+        // @ts-ignore
+        data.forEach((el) => cuckoo.add(el));
+      }
+      performance.mark("cuckoo-end" + String(datasetSize));
+      performance.measure(
+        "cuckoo" + String(datasetSize),
+        "cuckoo-start" + String(datasetSize),
+        "cuckoo-end" + String(datasetSize)
+      );
+
+      // Measure native Set
+      performance.mark("native-start" + String(datasetSize));
+      for (let i = 0; i < iterations; i++) {
+        data.forEach((el) => native.add(el));
+      }
+      performance.mark("native-end" + String(datasetSize));
+      performance.measure(
+        "native" + String(datasetSize),
+        "native-start" + String(datasetSize),
+        "native-end" + String(datasetSize)
+      );
+
+      // @ts-ignore
+      const cuckooTime = performance.getEntriesByName(
+        "cuckoo" + String(datasetSize)
+      )[0].duration;
+      // @ts-ignore
+      const nativeTime = performance.getEntriesByName(
+        "native" + String(datasetSize)
+      )[1].duration;
+
+      console.log(`CuckooSet execution time: ${cuckooTime.toFixed(2)} ms`);
+      console.log(`Native Set execution time: ${nativeTime.toFixed(2)} ms`);
+
+      expect(nativeTime).toBeLessThan(cuckooTime);
+      expect(cuckooTime).toBeLessThan(uniqueTiming);
+
+      console.log(
+        "CuckooSet size: " + cuckoo.size,
+        "Expected size: " + expectedSize
+      );
+      expect(cuckoo.size).toBe(expectedSize);
 
       console.log(
         "Native Set size: " + native.size,
