@@ -155,5 +155,6 @@ var MapSet = class {
 };
 export {
   MapSet,
+  MapSet as UniqueSet,
   structuralHash
 };

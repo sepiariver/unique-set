@@ -14,7 +14,7 @@
     "bench": "npm run build && vitest bench.spec.ts bench-nested.spec.ts",
     "bench-large": "NODE_OPTIONS='--max-old-space-size=4096' npm run build && vitest bench-large.spec.ts",
     "lint": "tsc",
-    "build": "tsup index.ts --format esm --dts"
+    "build": "tsup index.ts --format esm,cjs --dts"
   },
   "repository": {
     "type": "git",

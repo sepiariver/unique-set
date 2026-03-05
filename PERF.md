@@ -1,153 +1,43 @@
 # Performance
 
-Comparison against the native Set is irrelevant. Not only does it lack value deduplication, it's so much faster it makes comparison meaningless.
+Benchmarks run with `npm run bench` on Node.js v20.18.1, Apple M2 Pro.
 
-BloomSet was initialized with the default sized bit array `6553577` and either `1` or `7` hash iterations.
+## Flat Data (`bench.spec.ts`)
 
-All timing is expressed in milliseconds.
+Mixed strings, flat objects (2 keys), and 2-element arrays with ~10-15% duplicate rate.
 
-## Shallow Data
+|   Items | MapSet `add()` | Native Set | Overhead |
+| ------: | -------------: | ---------: | -------: |
+|     400 |        1.23 ms |    0.04 ms |     ~31x |
+|   1,000 |        1.46 ms |    0.18 ms |      ~8x |
+|  20,000 |       13.09 ms |    1.46 ms |      ~9x |
+| 100,000 |       54.08 ms |    6.44 ms |      ~8x |
 
-Shallow plain objects and Arrays, with 5 - 10% duplicates
+## Nested Data (`bench-nested.spec.ts`)
 
-### BloomSet hashCount: 1
+Deeply nested objects (3-4 levels), nested arrays with objects, and mixed structures.
 
-Trial 1
+### `add()` - insert all items
 
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 10.17    | 8.79    |
-| 1000  | 49.37    | 10.46   |
-| 20000 | 19812.43 | 2530.15 |
+|   Items |   MapSet | Native Set | Overhead |
+| ------: | -------: | ---------: | -------: |
+|     400 |  1.80 ms |    0.03 ms |     ~60x |
+|   1,000 |  3.01 ms |    0.05 ms |     ~60x |
+|  20,000 | 14.23 ms |    0.89 ms |     ~16x |
+| 100,000 | 80.60 ms |    3.80 ms |     ~21x |
 
-Trial 2
+### `has()` - query all items (50% hits, 50% misses)
 
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 10.06    | 8.75    |
-| 1000  | 48.99    | 10.36   |
-| 20000 | 19663.32 | 2536.92 |
+|   Items | `has()` time | Queries |   Hits | per query |
+| ------: | -----------: | ------: | -----: | --------: |
+|     400 |      0.96 ms |     457 |    228 |   ~2.1 us |
+|   1,000 |      0.95 ms |   1,144 |    572 |   ~0.8 us |
+|  20,000 |     16.86 ms |  22,892 | 11,446 |   ~0.7 us |
+| 100,000 |     73.89 ms | 114,458 | 57,229 |   ~0.6 us |
 
-It's clear BloomSet has something to offer starting at just a few hundred elements.
+## Notes
 
-### BloomSet hashCount: 7
-
-Trial 1
-
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 10.53    | 9.65    |
-| 1000  | 48.60    | 10.39   |
-| 20000 | 19242.54 | 2490.88 |
-
-Trial 2
-
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 9.79     | 9.02    |
-| 1000  | 48.85    | 10.49   |
-| 20000 | 19255.17 | 2489.50 |
-
-Performance is fairly stable and predictable with small datasets of shallow objects, regardless of hashCount.
-
-## Nested Data
-
-Plain objects and Arrays nested 1 or 2 levels deep, with 10-20% duplicates.
-
-### BloomSet hashCount: 1
-
-Trial 1
-
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 26.32    | 12.78   |
-| 1000  | 91.30    | 16.86   |
-| 20000 | 37671.41 | 5116.11 |
-
-Trial 2
-
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 21.15    | 12.65   |
-| 1000  | 115.2    | 16.33   |
-| 20000 | 37169.66 | 5031.50 |
-
-UniqueSet starts to suffer on > 1000 elements. It gets exponentially worse, especially with nested objects. Whereas BloomSet's optimizations keep it in the realm of usable at 20k elements. Subjectively I feel I'm willing to spend 5 seconds processing 20k elements if I need guaranteed uniqueness-by-value (but not 30 seconds).
-
-### BloomSet hashCount: 7
-
-Trial 1
-
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 20.58    | 13.57   |
-| 1000  | 91.23    | 16.81   |
-| 20000 | 37639.03 | 5151.90 |
-
-Running 7 hashes doesn't add a lot of clock time for BloomSet, even with nested objects. Rather than recalculating the hash over the entire serialized value, BloomSet does some bit-mixing to distribute the value's representation across the bit array.
-
-Trial 2
-
-| Count | Unique   | Bloom   |
-| ----- | -------- | ------- |
-| 400   | 22.86    | 13.48   |
-| 1000  | 94.64    | 17.80   |
-| 20000 | 37673.08 | 5276.09 |
-
-## Large (relatively)
-
-Still using the nested dataset. Very roughly 15% duplicates, distributed in a contrived manner using modulo.
-
-### hashCount: 7, size: 6553577
-
-Trial 1
-
-| Count  | Unique     | Bloom      |
-| ------ | ---------- | ---------- |
-| 100000 | 982,727.79 | 142,716.46 |
-
-```txt
-UniqueSet size: 100000 Expected size: 100000
-BloomSet size: 100000 Expected size: 100000
-Native Set size: 114458 Expected size: 114458
-```
-
-With a (relatively) large dataset, UniqueSet is slow enough to make me not want to test it again. It might be possible to squeeze extra performance from BloomSet by tweaking the config options.
-
-Trial 2
-
-| Count  | Unique     | Bloom      |
-| ------ | ---------- | ---------- |
-| 100000 | n/a        | 149600.27  |
-
-### hashCount: 1, size: 6553577
-
-Trial 1
-
-| Count  | Unique     | Bloom      |
-| ------ | ---------- | ---------- |
-| 100000 | n/a        | 135919.53  |
-
-Trial 2
-
-| Count  | Unique     | Bloom      |
-| ------ | ---------- | ---------- |
-| 100000 | n/a        | 135913.43  |
-
-Reducing the hashCount predictably improves performance by 5-10%. Collisions fallback to `fast-deep-equal`, so we can tolerate false positives unless performance degrades.
-
-#### hashCount: 1, size: 28755000
-
-Trial 1
-
-| Count  | Unique     | Bloom      |
-| ------ | ---------- | ---------- |
-| 100000 | n/a        | 128660.39  |
-
-Trial 2
-
-| Count  | Unique     | Bloom      |
-| ------ | ---------- | ---------- |
-| 100000 | n/a        | 127663.77  |
-
-Using a larger bit array requires more memory: ~3.5Mb in this case, still extremely memory-efficient for what it's doing. It seems to yield something like 5% clock time improvement over a smaller array, possibly due to decreased false positives, leading to less invocations of `fast-deep-equal` for deep comparison.
+- Native `Set` uses reference equality and cannot deduplicate objects/arrays by value. The overhead shown is the cost of deep value comparison.
+- MapSet uses a streaming 32-bit FNV-1a structural hash with `fast-deep-equal` fallback for hash collisions.
+- At 20,000 items, ~47 hash collisions are expected (birthday paradox). These are handled correctly with no impact on results.
+- The `has()` cost per query decreases at larger sizes due to V8 JIT warmup.

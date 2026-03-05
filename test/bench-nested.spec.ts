@@ -77,7 +77,7 @@ function generateDataset(size: number): Dataset {
 }
 
 describe("Performance Benchmarks - Nested Data", () => {
-  const datasetSizes = [400, 1000, 20000];
+  const datasetSizes = [400, 1000, 20000, 100000];
 
   for (const datasetSize of datasetSizes) {
     const { data, expectedDupes } = generateDataset(datasetSize);
@@ -120,6 +120,38 @@ describe("Performance Benchmarks - Nested Data", () => {
 
       expect(map.size).toBe(expectedSize);
       expect(native.size).toBe(expectedNativeSize);
+    });
+
+    it("MapSet has() - hits and misses: " + String(datasetSize), () => {
+      // Pre-populate with half the data
+      const half = Math.floor(data.length / 2);
+      const map = new MapSet(data.slice(0, half));
+
+      // Query all items — first half are hits, second half are mostly misses
+      const queries = data.map((el) => JSON.parse(JSON.stringify(el)));
+
+      performance.mark("has-start" + datasetSize);
+      let hits = 0;
+      for (const q of queries) {
+        if (map.has(q)) hits++;
+      }
+      performance.mark("has-end" + datasetSize);
+      performance.measure(
+        "has" + datasetSize,
+        "has-start" + datasetSize,
+        "has-end" + datasetSize
+      );
+
+      // @ts-ignore
+      const hasTime = performance.getEntriesByName("has" + datasetSize)[0]
+        .duration;
+
+      console.log(
+        `has(): ${hasTime.toFixed(2)} ms | ${hits} hits / ${queries.length} queries`
+      );
+
+      expect(hits).toBeGreaterThan(0);
+      expect(hits).toBeLessThan(queries.length);
     });
   }
 });
