@@ -1,6 +1,6 @@
 {
   "name": "@sepiariver/unique-set",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "A Set-like collection that deduplicates by deep value equality using a streaming structural hash and fast-deep-equal.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -14,7 +14,7 @@
     "bench": "npm run build && vitest bench.spec.ts bench-nested.spec.ts",
     "bench-large": "NODE_OPTIONS='--max-old-space-size=4096' npm run build && vitest bench-large.spec.ts",
     "lint": "tsc",
-    "build": "tsup index.ts --format esm --dts"
+    "build": "tsup index.ts --format esm,cjs --dts"
   },
   "repository": {
     "type": "git",

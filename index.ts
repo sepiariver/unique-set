@@ -1,8 +1,9 @@
 import equal from "fast-deep-equal/es6/index.js";
 
-/** Streaming structural hash — computes a 32-bit FNV-1a hash by traversing
- *  the value directly, without allocating an intermediate string. */
-
+/** 
+ * Streaming structural hash — computes a 32-bit FNV-1a hash by traversing
+ * the value directly, without allocating an intermediate string.
+ */
 const _f64 = new Float64Array(1);
 const _u8 = new Uint8Array(_f64.buffer);
 
@@ -177,3 +178,5 @@ export class MapSet<T> {
     yield* this.values();
   }
 }
+
+export { MapSet as UniqueSet };

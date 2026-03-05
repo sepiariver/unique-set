@@ -93,6 +93,35 @@ describe("MapSet", () => {
     expect(edgeCaseSet.has(fn)).toBeTruthy();
   });
 
+  it("distinguishes values across types", () => {
+    const set = new MapSet();
+    // Falsy values are all distinct
+    set.add(0);
+    set.add(false);
+    set.add(null);
+    set.add(undefined);
+    set.add("");
+    set.add(NaN);
+    expect(set.size).toBe(6);
+
+    // Number vs numeric string
+    set.add(1);
+    set.add("1");
+    expect(set.size).toBe(8);
+
+    // Empty containers
+    set.add({});
+    set.add([]);
+    expect(set.size).toBe(10);
+
+    // All still findable
+    expect(set.has(0)).toBeTruthy();
+    expect(set.has(false)).toBeTruthy();
+    expect(set.has("1")).toBeTruthy();
+    expect(set.has({})).toBeTruthy();
+    expect(set.has([])).toBeTruthy();
+  });
+
   it("handles nested objects and arrays", () => {
     const nested = new MapSet();
 

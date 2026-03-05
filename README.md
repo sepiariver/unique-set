@@ -1,86 +1,71 @@
 # @sepiariver/unique-set
 
-Extends the native `Set` class to deeply compare using [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal), with optional Bloom filter optimization.
+Uses a streaming structural hash to optimize deep equality checks in a `Set`-like class. Falls back to deeply compare using [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal) when hash collisions occur.
 
 Supports ESM and CommonJS. Thanks [@sakgoyal](https://github.com/sakgoyal) for contributing to and instigating ESM support.
 
 ```js
-import { BloomSet, UniqueSet } from '@sepiariver/unique-set';
+import { MapSet, UniqueSet } from '@sepiariver/unique-set';
 ```
 
 ```js
-const { BloomSet, UniqueSet } = require('@sepiariver/unique-set');
+const { MapSet, UniqueSet } = require('@sepiariver/unique-set');
 ```
 
-WARNING: This version exports 2 classes instead of a single default class, breaking b/c with version 1.
+WARNING: Version 3 includes breaking changes. Older versions are deprecated.
 
-The overridden methods iterate through the elements of the `UniqueSet` deeply comparing equality until existence is found. If no elements match, the entire `UniqueSet` would have been iterated. However fast `fast-deep-equal` is [reported to be](https://github.com/epoberezkin/fast-deep-equal?tab=readme-ov-file#performance-benchmark), its time complexity is dependent on the depth of objects being compared. Calling it in a loop makes performance many, many times worse than the native `Set`.
+Configuration options from previous versions are no longer supported. Usage is identical to the native `Set` class.
 
-_For datasets greater than a thousand elements, there is probably a better way to achieve what you're trying to do._ Otherwise, `UniqueSet` is convenient.
+IMPORTANT: `MapSet` and `UniqueSet` are the same class (`UniqueSet` is an alias). The `delete` method uses deep equality, so `delete({a: 1})` will remove a previously added `{a: 1}` even if it's a different reference.
 
-**UPDATE:** Version 2 ships with `BloomSet`, which uses a Bloom filter to greatly optimize absence checks, falling back to `fast-deep-equal` to validate potential false positives. This class is useful for larger datasets, up to the tens of thousands or even 100k depending largely on configuration. It performs about 3-10 times faster than `UniqueSet` for datasets greater than 1000 elements. Less than a few hundred (~400) elements, `UniqueSet` can be faster—it all depens on your dataset and config options. In all scenarios except the absolute best case, BloomSet is still orders of magnitude slower than the native `Set`, but if deep equality is required, this is a decent option.
+## API
 
-Highly recommended: experiment with config options to find the best performance for your use case.
+### Constructor
 
-IMPORTANT: The `delete` method is unmodified in both classes. In the case of duplicate objects that are equivalent but have different references, the results of `delete` operations may be unexpected.
+```js
+new MapSet(iterable?)
+new UniqueSet(iterable?)
+```
 
-## Config Options
+Accepts any iterable (array, Set, generator, etc.). Duplicates by value are discarded during construction.
 
-### Constructor Signature
+### Methods
 
-`new BloomSet(iterable = [], options = { size, hashCount });`
-
-### Options
-
-The options object allows you to customize the behavior and performance of the BloomSet. The following properties can be configured:
-
-#### 1. size (number)
-
-Description: Specifies the size of the bit array used internally by the Bloom filter. This directly impacts the memory usage and false positive probability.
-
-Default: 6,553,577 (a prime number using roughly 800 KB of memory).
-
-Recommendations:
-
-For datasets with ~100,000 elements, this default size provides excellent performance (compared against `UniqueSet`) with minimal (< 1) false positives.
-
-Larger datasets may require increasing the size for lower false positive rates. Remember though, false positives are mitigated by a fallback to `fast-deep-equal`, so you may be able to squeeze more performance from a higher tolerance for false positives, depending on your dataset.
-
-#### 2. hashCount (number)
-
-Description: Specifies the number of hash functions used by the Bloom filter. This impacts both the false positive probability and the computational cost of adding/checking elements.
-
-Default: 7
+| Method | Description |
+|---|---|
+| `add(value)` | Adds `value` if no deeply-equal value exists. Returns `this`. |
+| `has(value)` | Returns `true` if a deeply-equal value is in the set. |
+| `delete(value)` | Removes the first deeply-equal value. Returns `true` if found. |
+| `clear()` | Removes all values. |
+| `forEach(cb, thisArg?)` | Calls `cb(value, value, set)` for each value. |
+| `values()` | Returns an iterator over all values. |
+| `[Symbol.iterator]()` | Makes the set iterable (e.g., `for...of`, spread). |
+| `size` | The number of unique values in the set. |
 
 ### Examples
 
-Default Configuration:
-
 ```js
-const bloomSet = new BloomSet();
-bloomSet.add("example");
-console.log(bloomSet.has("example")); // true
-```
+const set = new UniqueSet();
 
-Custom Configuration for Larger Datasets:
+set.add({ a: 1, b: 2 });
+set.add({ b: 2, a: 1 }); // same value, different key order: not added
+set.size; // 1
 
-Example 28,755,000 bit array size uses roughly 3.5 MB of memory, but this configuration is robust against datasets of something like 1M elements. The practicality of using BloomSet with that many elements is low, due to the performance hit of deep equality checks.
+set.has({ a: 1, b: 2 }); // true (deep equality, not reference)
 
-```js
-const bloomSet = new BloomSet([], { size: 28755000, hashCount: 20 });
-bloomSet.add("custom");
-console.log(bloomSet.has("custom")); // true
+set.add([1, [2, 3]]);
+set.add([1, [2, 3]]); // duplicate nested array: not added
+set.size; // 2
+
+set.delete({ a: 1, b: 2 }); // true
+set.size; // 1
 ```
 
 ### Considerations
 
-- Memory Usage: The bit array uses size / 8 bytes of memory. Even at 800 KB, initializing 1250 BloomSets in the same scope would use a gigabyte of memory.
-- False Positive Rate: The probability of a false positive is influenced by size, hashCount, and the number of elements. Adjust these values to balance performance and accuracy for your dataset.
-
-#### Further Tuning
-
-- Use a larger size for datasets exceeding 100,000 elements.
-- Reduce hashCount if performance is critical and your dataset contains very few duplicates.
+- **Memory**: Each unique value is stored once, bucketed by a 32-bit structural hash. Overhead is minimal: one `Map` entry plus a small array per hash bucket, with >99% of buckets containing exactly one item at typical sizes.
+- **Collisions**: At 20,000 items, roughly 47 hash collisions are expected (birthday paradox on 32-bit). Collisions are handled correctly via `fast-deep-equal`. They add a small cost but never affect correctness.
+- **Equality semantics**: Object key order is ignored. Array element order matters. `NaN === NaN`. `0` and `-0` are treated as equal. Functions and symbols are compared by reference.
 
 ## Installation
 
@@ -91,7 +76,7 @@ npm install @sepiariver/unique-set
 ## Usage
 
 ```js
-const { BloomSet, UniqueSet } = require('@sepiariver/unique-set');
+import { MapSet, UniqueSet } from "./dist/index.mjs";
 
 const data = [
   "string",
@@ -114,21 +99,24 @@ const data = [
   [1, 2, 3],
 ];
 
+const norm = new Set();
 const unique1 = new UniqueSet();
 data.forEach((el) => {
   unique1.add(el);
+  norm.add(el);
 });
 const unique2 = new UniqueSet(data);
 console.log(unique1.size); // 6 instead of 8 with Set
 console.log(unique2.size); // 6
+console.log(norm.size); // 8 with Set
 
-const bloom1 = new BloomSet();
+const map1 = new MapSet();
 data.forEach((el) => {
-  bloom1.add(el);
+  map1.add(el);
 });
-const bloom2 = new BloomSet(data);
-console.log(bloom1.size); // 6 instead of 8 with Set
-console.log(bloom2.size); // 6
+const map2 = new MapSet(data);
+console.log(map1.size); // 6 instead of 8 with Set
+console.log(map2.size); // 6
 ```
 
 ## Testing
