@@ -1,4 +1,5 @@
 import { MapSet } from "../dist/index.mjs";
+import { DeepSet } from "deep-equality-data-structures";
 import { performance } from "perf_hooks";
 import { describe, it, expect } from "vitest";
 
@@ -76,6 +77,17 @@ function generateDataset(size: number): Dataset {
   return { data, expectedDupes };
 }
 
+function measure(label: string, fn: () => void): number {
+  const start = `${label}-start`;
+  const end = `${label}-end`;
+  performance.mark(start);
+  fn();
+  performance.mark(end);
+  performance.measure(label, start, end);
+  // @ts-ignore
+  return performance.getEntriesByName(label)[0].duration;
+}
+
 describe("Performance Benchmarks - Nested Data", () => {
   const datasetSizes = [400, 1000, 20000, 100000];
 
@@ -85,73 +97,62 @@ describe("Performance Benchmarks - Nested Data", () => {
     const expectedNativeSize = dataSize;
     const expectedSize = dataSize - expectedDupes;
 
-    it("MapSet vs native Set: " + String(datasetSize), () => {
-      const map = new MapSet();
+    it("UniqueSet vs DeepSet vs native Set: " + String(datasetSize), () => {
+      const unique = new MapSet();
+      const deep = new DeepSet();
       const native = new Set();
 
-      performance.mark("map-start" + datasetSize);
-      data.forEach((el) => map.add(el));
-      performance.mark("map-end" + datasetSize);
-      performance.measure(
-        "map" + datasetSize,
-        "map-start" + datasetSize,
-        "map-end" + datasetSize
-      );
+      const uniqueTime = measure(`unique-nested-${datasetSize}`, () => {
+        data.forEach((el) => unique.add(el));
+      });
 
-      performance.mark("native-start" + datasetSize);
-      data.forEach((el) => native.add(el));
-      performance.mark("native-end" + datasetSize);
-      performance.measure(
-        "native" + datasetSize,
-        "native-start" + datasetSize,
-        "native-end" + datasetSize
-      );
+      const deepTime = measure(`deep-nested-${datasetSize}`, () => {
+        data.forEach((el) => deep.add(el));
+      });
 
-      // @ts-ignore
-      const mapTime = performance.getEntriesByName("map" + datasetSize)[0]
-        .duration;
-      // @ts-ignore
-      const nativeTime = performance.getEntriesByName("native" + datasetSize)[0]
-        .duration;
+      const nativeTime = measure(`native-nested-${datasetSize}`, () => {
+        data.forEach((el) => native.add(el));
+      });
 
       console.log(
-        `MapSet: ${mapTime.toFixed(2)} ms | Native Set: ${nativeTime.toFixed(2)} ms`
+        `UniqueSet: ${uniqueTime.toFixed(2)} ms | DeepSet: ${deepTime.toFixed(2)} ms | Native Set: ${nativeTime.toFixed(2)} ms`
       );
 
-      expect(map.size).toBe(expectedSize);
+      expect(unique.size).toBe(expectedSize);
+      expect(deep.size).toBe(expectedSize);
       expect(native.size).toBe(expectedNativeSize);
     });
 
-    it("MapSet has() - hits and misses: " + String(datasetSize), () => {
+    it("UniqueSet.has() vs DeepSet.has() - hits and misses: " + String(datasetSize), () => {
       // Pre-populate with half the data
       const half = Math.floor(data.length / 2);
-      const map = new MapSet(data.slice(0, half));
+      const uniqueSet = new MapSet(data.slice(0, half));
+      const deepSet = new DeepSet(data.slice(0, half));
 
       // Query all items — first half are hits, second half are mostly misses
       const queries = data.map((el) => JSON.parse(JSON.stringify(el)));
 
-      performance.mark("has-start" + datasetSize);
-      let hits = 0;
-      for (const q of queries) {
-        if (map.has(q)) hits++;
-      }
-      performance.mark("has-end" + datasetSize);
-      performance.measure(
-        "has" + datasetSize,
-        "has-start" + datasetSize,
-        "has-end" + datasetSize
-      );
+      let uniqueHits = 0;
+      const uniqueHasTime = measure(`unique-has-${datasetSize}`, () => {
+        for (const q of queries) {
+          if (uniqueSet.has(q)) uniqueHits++;
+        }
+      });
 
-      // @ts-ignore
-      const hasTime = performance.getEntriesByName("has" + datasetSize)[0]
-        .duration;
+      let deepHits = 0;
+      const deepHasTime = measure(`deep-has-${datasetSize}`, () => {
+        for (const q of queries) {
+          if (deepSet.has(q)) deepHits++;
+        }
+      });
 
       console.log(
-        `has(): ${hasTime.toFixed(2)} ms | ${hits} hits / ${queries.length} queries`
+        `UniqueSet.has(): ${uniqueHasTime.toFixed(2)} ms | DeepSet.has(): ${deepHasTime.toFixed(2)} ms | ${uniqueHits} hits / ${queries.length} queries`
       );
 
-      expect(hits).toBeGreaterThan(0);
-      expect(hits).toBeLessThan(queries.length);
+      expect(uniqueHits).toBe(deepHits);
+      expect(uniqueHits).toBeGreaterThan(0);
+      expect(uniqueHits).toBeLessThan(queries.length);
     });
   }
 });

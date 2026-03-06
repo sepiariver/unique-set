@@ -1,4 +1,5 @@
 import { MapSet } from "../dist/index.mjs";
+import { DeepSet } from "deep-equality-data-structures";
 import { performance } from "perf_hooks";
 import { describe, it, expect } from "vitest";
 
@@ -39,6 +40,17 @@ function generateDataset(size: number): Dataset {
   return { data, expectedDupes, stringDupes };
 }
 
+function measure(label: string, fn: () => void): number {
+  const start = `${label}-start`;
+  const end = `${label}-end`;
+  performance.mark(start);
+  fn();
+  performance.mark(end);
+  performance.measure(label, start, end);
+  // @ts-ignore
+  return performance.getEntriesByName(label)[0].duration;
+}
+
 describe("Performance Benchmarks", () => {
   const datasetSizes = [400, 1000, 20000, 100000];
 
@@ -48,40 +60,29 @@ describe("Performance Benchmarks", () => {
     const expectedNativeSize = dataSize - stringDupes;
     const expectedSize = expectedNativeSize - expectedDupes;
 
-    it("MapSet vs native Set: " + String(datasetSize), () => {
-      const map = new MapSet();
+    it("UniqueSet vs DeepSet vs native Set: " + String(datasetSize), () => {
+      const unique = new MapSet();
+      const deep = new DeepSet();
       const native = new Set();
 
-      performance.mark("map-start" + datasetSize);
-      data.forEach((el) => map.add(el));
-      performance.mark("map-end" + datasetSize);
-      performance.measure(
-        "map" + datasetSize,
-        "map-start" + datasetSize,
-        "map-end" + datasetSize
-      );
+      const uniqueTime = measure(`unique-${datasetSize}`, () => {
+        data.forEach((el) => unique.add(el));
+      });
 
-      performance.mark("native-start" + datasetSize);
-      data.forEach((el) => native.add(el));
-      performance.mark("native-end" + datasetSize);
-      performance.measure(
-        "native" + datasetSize,
-        "native-start" + datasetSize,
-        "native-end" + datasetSize
-      );
+      const deepTime = measure(`deep-${datasetSize}`, () => {
+        data.forEach((el) => deep.add(el));
+      });
 
-      // @ts-ignore
-      const mapTime = performance.getEntriesByName("map" + datasetSize)[0]
-        .duration;
-      // @ts-ignore
-      const nativeTime = performance.getEntriesByName("native" + datasetSize)[0]
-        .duration;
+      const nativeTime = measure(`native-${datasetSize}`, () => {
+        data.forEach((el) => native.add(el));
+      });
 
       console.log(
-        `MapSet: ${mapTime.toFixed(2)} ms | Native Set: ${nativeTime.toFixed(2)} ms`
+        `UniqueSet: ${uniqueTime.toFixed(2)} ms | DeepSet: ${deepTime.toFixed(2)} ms | Native Set: ${nativeTime.toFixed(2)} ms`
       );
 
-      expect(map.size).toBe(expectedSize);
+      expect(unique.size).toBe(expectedSize);
+      expect(deep.size).toBe(expectedSize);
       expect(native.size).toBe(expectedNativeSize);
     });
   }

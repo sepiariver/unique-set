@@ -1,9 +1,7 @@
 "use strict";
-var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -17,14 +15,6 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // index.ts
@@ -35,7 +25,7 @@ __export(unique_set_exports, {
   structuralHash: () => structuralHash
 });
 module.exports = __toCommonJS(unique_set_exports);
-var import_es6 = __toESM(require("fast-deep-equal/es6/index.js"));
+var import_fast_equals = require("fast-equals");
 var _f64 = new Float64Array(1);
 var _u8 = new Uint8Array(_f64.buffer);
 var structuralHash = (value) => {
@@ -139,7 +129,7 @@ var MapSet = class {
       this.#size++;
     } else {
       for (const item of bucket) {
-        if ((0, import_es6.default)(value, item)) return this;
+        if ((0, import_fast_equals.deepEqual)(value, item)) return this;
       }
       bucket.push(value);
       this.#size++;
@@ -151,7 +141,7 @@ var MapSet = class {
     const bucket = this.#map.get(hash);
     if (!bucket) return false;
     for (const item of bucket) {
-      if ((0, import_es6.default)(value, item)) return true;
+      if ((0, import_fast_equals.deepEqual)(value, item)) return true;
     }
     return false;
   }
@@ -160,7 +150,7 @@ var MapSet = class {
     const bucket = this.#map.get(hash);
     if (!bucket) return false;
     for (let i = 0; i < bucket.length; i++) {
-      if ((0, import_es6.default)(value, bucket[i])) {
+      if ((0, import_fast_equals.deepEqual)(value, bucket[i])) {
         bucket.splice(i, 1);
         if (bucket.length === 0) this.#map.delete(hash);
         this.#size--;
