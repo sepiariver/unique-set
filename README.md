@@ -1,6 +1,6 @@
 # @sepiariver/unique-set
 
-Uses a streaming structural hash to optimize deep equality checks in a `Set`-like class. Falls back to deeply compare using [fast-deep-equal](https://www.npmjs.com/package/fast-deep-equal) only when hash collisions occur.
+Unique set is highly-performant, given the workload. It uses a streaming structural hash to optimize deep equality checks. Falls back to deeply compare using [fast-equals](https://www.npmjs.com/package/fast-equals) only when hash collisions occur.
 
 Supports ESM and CommonJS. Thanks [@sakgoyal](https://github.com/sakgoyal) for contributing to and instigating ESM support.
 
@@ -65,15 +65,14 @@ set.size; // 1
 
 - **Performance**: See [PERF.md](PERF.md) for benchmarks. UniqueSet is optimized for deep equality with O(1) average complexity for both `add()` and `has()`, performing _25-35x faster_ than other deep equality `Set`-like implementations, especially on nested data at scale.
 - **Memory**: Each unique value is stored once, bucketed by a 32-bit structural hash. Overhead is minimal: one `Map` entry plus a small array per hash bucket, with >99% of buckets containing exactly one item at typical sizes.
-- **Collisions**: At 20,000 items, roughly 47 hash collisions are expected (birthday paradox on 32-bit). Collisions are handled correctly via `fast-deep-equal`. They add a small cost but never affect correctness.
-- **Equality semantics**:
-UniqueSet's hash is more thorough than `fast-deep-equal` in certain edge cases. It correctly produces the same hash for structurally-equal Sets/Maps regardless of insertion order or object identity, but `fast-deep-equal` uses `===` for the element lookup.
-  - **Plain objects**: Key order is ignored; `fast-deep-equal` compares by key.
+- **Collisions**: At 20,000 items, roughly 47 hash collisions are expected (birthday paradox on 32-bit). Collisions are handled correctly via `fast-equals`. They add a small cost but never affect correctness.
+- **Equality semantics**: Both the structural hash and `fast-equals` use deep value comparison throughout, so they are fully aligned.
+  - **Plain objects**: Key order is ignored.
   - **Arrays**: Element order matters (hash is sequential; equality is index-by-index).
-  - **`Set` values**: Insertion order is ignored, so `new Set([1, 2])` and `new Set([2, 1])` are treated as equal. However, `fast-deep-equal` compares Set elements using native `Set.has()` (i.e., `===`), so this only works reliably for Sets containing primitives. Sets containing objects may not deduplicate as expected because element lookup falls back to reference equality.
-  - **`Map` values**: Insertion order is ignored. Same `===` caveat applies to Map keys that are objects.
+  - **`Set` values**: Insertion order is ignored. `new Set([1, 2])` and `new Set([2, 1])` are treated as equal, including Sets containing objects (both layers use deep comparison).
+  - **`Map` values**: Insertion order is ignored. Both keys and values are compared by deep equality.
   - **Primitives**: `NaN === NaN`. `0` and `-0` are treated as equal.
-  - **Functions and symbols**: Compared by reference. They hash by their string representation (`String(value)`), so same-source functions may land in the same bucket, but `fast-deep-equal` uses `===` for the final check.
+  - **Functions and symbols**: Compared by reference. They hash by their string representation (`String(value)`), so same-source functions may land in the same bucket, but `fast-equals` uses `===` for the final check.
 
 ## Installation
 

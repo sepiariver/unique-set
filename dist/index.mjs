@@ -1,5 +1,5 @@
 // index.ts
-import equal from "fast-deep-equal/es6/index.js";
+import { deepEqual as equal } from "fast-equals";
 var _f64 = new Float64Array(1);
 var _u8 = new Uint8Array(_f64.buffer);
 var structuralHash = (value) => {

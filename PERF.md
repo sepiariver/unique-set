@@ -40,6 +40,6 @@ Deeply nested objects (3-4 levels), nested arrays with objects, and mixed struct
 ## Notes
 
 - **Native `Set`** uses reference equality and cannot deduplicate objects/arrays by value.
-- **UniqueSet** (this package) uses a streaming 32-bit FNV-1a structural hash with `fast-deep-equal` only as fallback for hash collisions. O(1) average for both `add()` and `has()`.
+- **UniqueSet** (this package) uses a streaming 32-bit FNV-1a structural hash with `fast-equals` only as fallback for hash collisions. O(1) average for both `add()` and `has()`.
 - **DeepSet** (`deep-equality-data-structures`) hashes values with `object-hash` (MD5 by default) for O(1) lookups. The performance gap comes from MD5 being a cryptographic hash and `object-hash` serializing values before hashing.
 - UniqueSet is roughly **25–35x faster** than DeepSet on nested data at scale, while both produce identical deduplication results.

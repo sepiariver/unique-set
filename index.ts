@@ -1,4 +1,4 @@
-import equal from "fast-deep-equal/es6/index.js";
+import { deepEqual as equal } from "fast-equals";
 
 /** 
  * Streaming structural hash — computes a 32-bit FNV-1a hash by traversing
