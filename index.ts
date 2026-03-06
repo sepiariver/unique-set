@@ -56,20 +56,20 @@ const _shash = (value: unknown, hash: number): number => {
     return hash;
   }
   if (value instanceof Map) {
-    hash = _mix(hash, 0x11);
-    const entries = Array.from(value.entries()).sort(([a], [b]) =>
-      String(a).localeCompare(String(b))
-    );
-    for (const [k, v] of entries) {
-      hash = _shash(k, hash);
-      hash = _shash(v, hash);
+    let mapHash = 0;
+    for (const [k, v] of value) {
+      let entryHash = _shash(k, 0x811c9dc5);
+      entryHash = _shash(v, entryHash);
+      mapHash = (mapHash + entryHash) | 0; // order-independent hash by summing entry hashes (32-bit)
     }
-    return hash;
+    return _mix(hash, mapHash);
   }
   if (value instanceof Set) {
-    hash = _mix(hash, 0x12);
-    for (const v of value) hash = _shash(v, hash);
-    return hash;
+    let setHash = 0;
+    for (const v of value) {
+      setHash = (setHash + _shash(v, 0x811c9dc5)) | 0; // order-independent hash by summing element hashes (32-bit)
+    }
+    return _mix(hash, setHash);
   }
   if (value instanceof Date) {
     hash = _mix(hash, 0x14);
@@ -82,14 +82,18 @@ const _shash = (value: unknown, hash: number): number => {
     return _mixStr(hash, value.toString());
   }
 
-  // Plain object — sort keys for order-independence
+  // Plain object: order-independent
   hash = _mix(hash, 0x13);
-  const keys = Object.keys(value as object).sort();
-  for (const key of keys) {
-    hash = _mixStr(hash, key);
-    hash = _shash((value as Record<string, unknown>)[key], hash);
+  let objHash = 0;
+  const keys = Object.keys(value as object);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]!;
+    let pairHash = _mixStr(0x811c9dc5, key);
+    pairHash = _shash((value as Record<string, unknown>)[key], pairHash);
+    objHash = (objHash + pairHash) | 0;
   }
-  return hash;
+
+  return _mix(hash, objHash);
 };
 
 export class MapSet<T> {

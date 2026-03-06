@@ -46,20 +46,20 @@ var _shash = (value, hash) => {
     return hash;
   }
   if (value instanceof Map) {
-    hash = _mix(hash, 17);
-    const entries = Array.from(value.entries()).sort(
-      ([a], [b]) => String(a).localeCompare(String(b))
-    );
-    for (const [k, v] of entries) {
-      hash = _shash(k, hash);
-      hash = _shash(v, hash);
+    let mapHash = 0;
+    for (const [k, v] of value) {
+      let entryHash = _shash(k, 2166136261);
+      entryHash = _shash(v, entryHash);
+      mapHash = mapHash + entryHash | 0;
     }
-    return hash;
+    return _mix(hash, mapHash);
   }
   if (value instanceof Set) {
-    hash = _mix(hash, 18);
-    for (const v of value) hash = _shash(v, hash);
-    return hash;
+    let setHash = 0;
+    for (const v of value) {
+      setHash = setHash + _shash(v, 2166136261) | 0;
+    }
+    return _mix(hash, setHash);
   }
   if (value instanceof Date) {
     hash = _mix(hash, 20);
@@ -72,12 +72,15 @@ var _shash = (value, hash) => {
     return _mixStr(hash, value.toString());
   }
   hash = _mix(hash, 19);
-  const keys = Object.keys(value).sort();
-  for (const key of keys) {
-    hash = _mixStr(hash, key);
-    hash = _shash(value[key], hash);
+  let objHash = 0;
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    let pairHash = _mixStr(2166136261, key);
+    pairHash = _shash(value[key], pairHash);
+    objHash = objHash + pairHash | 0;
   }
-  return hash;
+  return _mix(hash, objHash);
 };
 var MapSet = class {
   #map;
