@@ -1,6 +1,6 @@
 {
   "name": "@sepiariver/unique-set",
-  "version": "3.1.3",
+  "version": "3.1.4",
   "description": "A Set-like collection that deduplicates by deep value equality using a streaming structural hash and fast-deep-equal.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -38,6 +38,7 @@
     "fast-deep-equal": "^3.1.3"
   },
   "devDependencies": {
+    "deep-equality-data-structures": "^2.0.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
