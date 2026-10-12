@@ -1,6 +1,6 @@
 # @sepiariver/unique-set
 
-Unique set is highly-performant, given the workload. It uses a streaming structural hash to optimize deep equality checks. Falls back to deeply compare using [fast-equals](https://www.npmjs.com/package/fast-equals) only when hash collisions occur.
+Unique set is highly-performant, given the workload. It uses a streaming structural hash to optimize deep equality checks. Every hash match is confirmed with a deep comparison using [fast-equals](https://www.npmjs.com/package/fast-equals), so a hash collision never produces a wrong result (see [Collision safety](PERF.md#collision-safety)).
 
 Supports ESM and CommonJS. Thanks [@sakgoyal](https://github.com/sakgoyal) for contributing to and instigating ESM support.
 
