@@ -54,3 +54,7 @@ temp*.*js
 
 # VSCode
 .vscode/
+
+# Scratch
+.idea/
+tmp/

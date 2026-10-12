@@ -43,3 +43,7 @@ jspm_packages/
 
 # VSCode
 .vscode/
+
+# Scratch
+.idea/
+tmp/
