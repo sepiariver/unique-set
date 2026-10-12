@@ -1,5 +1,4 @@
 import { MapSet } from "../dist/index.mjs";
-import { performance } from "perf_hooks";
 import { describe, it, expect } from "vitest";
 
 function findNextPrime(num: number): number {

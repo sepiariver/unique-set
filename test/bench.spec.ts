@@ -1,6 +1,5 @@
 import { MapSet } from "../dist/index.mjs";
 import { DeepSet } from "deep-equality-data-structures";
-import { performance } from "perf_hooks";
 import { describe, it, expect } from "vitest";
 
 interface Dataset {

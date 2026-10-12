@@ -10,10 +10,10 @@
     "import": "./dist/index.mjs"
   },
   "scripts": {
-    "test": "npm run build && vitest basic.spec.ts",
-    "bench": "npm run build && vitest bench.spec.ts bench-nested.spec.ts",
-    "bench-large": "NODE_OPTIONS='--max-old-space-size=4096' npm run build && vitest bench-large.spec.ts",
-    "lint": "tsc",
+    "test": "npm run build && vitest run basic.spec.ts",
+    "bench": "npm run build && vitest run bench.spec.ts bench-nested.spec.ts",
+    "bench-large": "npm run build && NODE_OPTIONS='--max-old-space-size=4096' vitest run bench-large.spec.ts",
+    "lint": "tsc && tsc -p test",
     "build": "tsup index.ts --format esm,cjs --dts"
   },
   "repository": {
@@ -35,12 +35,13 @@
   },
   "homepage": "https://github.com/sepiariver/unique-set#readme",
   "dependencies": {
-    "fast-equals": "^6.0.0"
+    "fast-equals": "^6.1.1"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "deep-equality-data-structures": "^2.0.0",
-    "tsup": "^8.3.5",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
   }
 }
