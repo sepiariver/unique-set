@@ -96,8 +96,27 @@ const _shash = (value: unknown, hash: number): number => {
   return _mix(hash, objHash);
 };
 
+/**
+ * Internal `Map` key. Signed, so on 64-bit V8 without pointer compression every key
+ * is a small integer, where an unsigned key at or above 2^31 would be boxed as a heap
+ * number. `structuralHash` stays unsigned because its output is public.
+ */
+const _key = (value: unknown): number => _shash(value, 0x811c9dc5) | 0;
+
+/**
+ * Values whose keys collide. Module-private, so no stored value can be a `Bucket`,
+ * which makes `instanceof Bucket` a safe discriminator. Always holds two or more items.
+ */
+class Bucket<T> {
+  items: T[];
+  constructor(first: T, second: T) {
+    this.items = [first, second];
+  }
+}
+
 export class MapSet<T> {
-  #map: Map<number, T[]>;
+  // A lone value is stored inline; a `Bucket` replaces it only on a key collision.
+  #map: Map<number, T | Bucket<T>>;
   #size: number;
 
   constructor(iterable: Iterable<T> = []) {
@@ -112,44 +131,59 @@ export class MapSet<T> {
   }
 
   add(value: T): this {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) {
-      this.#map.set(hash, [value]);
-      this.#size++;
-    } else {
-      for (const item of bucket) {
+    const key = _key(value);
+    const slot = this.#map.get(key);
+    // `get()` also returns `undefined` for a stored `undefined`, so confirm the miss.
+    if (slot === undefined && !this.#map.has(key)) {
+      this.#map.set(key, value);
+    } else if (slot instanceof Bucket) {
+      for (const item of slot.items) {
         if (equal(value, item)) return this;
       }
-      bucket.push(value);
-      this.#size++;
+      slot.items.push(value);
+    } else {
+      if (equal(value, slot)) return this;
+      this.#map.set(key, new Bucket(slot as T, value)); // `slot` may be a stored `undefined`
     }
+    this.#size++;
     return this;
   }
 
   has(value: T): boolean {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) return false;
-    for (const item of bucket) {
-      if (equal(value, item)) return true;
+    const key = _key(value);
+    const slot = this.#map.get(key);
+    if (slot instanceof Bucket) {
+      for (const item of slot.items) {
+        if (equal(value, item)) return true;
+      }
+      return false;
     }
-    return false;
+    // Only `undefined` equals `undefined`, so the extra lookup is needed for that value alone.
+    if (slot === undefined) return value === undefined && this.#map.has(key);
+    return equal(value, slot);
   }
 
   delete(value: T): boolean {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) return false;
-    for (let i = 0; i < bucket.length; i++) {
-      if (equal(value, bucket[i])) {
-        bucket.splice(i, 1);
-        if (bucket.length === 0) this.#map.delete(hash);
-        this.#size--;
-        return true;
+    const key = _key(value);
+    const slot = this.#map.get(key);
+    if (slot instanceof Bucket) {
+      const items = slot.items;
+      for (let i = 0; i < items.length; i++) {
+        if (equal(value, items[i])) {
+          items.splice(i, 1);
+          if (items.length === 1) this.#map.set(key, items[0]!);
+          this.#size--;
+          return true;
+        }
       }
+      return false;
     }
-    return false;
+    if (slot === undefined ? value !== undefined || !this.#map.has(key) : !equal(value, slot)) {
+      return false;
+    }
+    this.#map.delete(key);
+    this.#size--;
+    return true;
   }
 
   get size(): number {
@@ -165,16 +199,24 @@ export class MapSet<T> {
     callback: (value: T, valueAgain: T, set: this) => void,
     thisArg?: any
   ): void {
-    for (const bucket of this.#map.values()) {
-      for (const value of bucket) {
-        callback.call(thisArg, value, value, this);
+    for (const slot of this.#map.values()) {
+      if (slot instanceof Bucket) {
+        for (const value of slot.items) {
+          callback.call(thisArg, value, value, this);
+        }
+      } else {
+        callback.call(thisArg, slot, slot, this);
       }
     }
   }
 
   *values(): IterableIterator<T> {
-    for (const bucket of this.#map.values()) {
-      yield* bucket;
+    for (const slot of this.#map.values()) {
+      if (slot instanceof Bucket) {
+        yield* slot.items;
+      } else {
+        yield slot;
+      }
     }
   }
 

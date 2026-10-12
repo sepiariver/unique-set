@@ -10,10 +10,9 @@
     "import": "./dist/index.mjs"
   },
   "scripts": {
-    "test": "npm run build && vitest run basic.spec.ts",
-    "bench": "npm run build && vitest run bench.spec.ts bench-nested.spec.ts",
-    "bench-large": "npm run build && NODE_OPTIONS='--max-old-space-size=4096' vitest run bench-large.spec.ts",
-    "bench-competitors": "npm run build && vitest bench --run competitors",
+    "test": "npm run build && vitest run basic.spec.ts extra.spec.ts property.spec.ts datasets.spec.ts",
+    "bench": "npm run build && vitest bench --run",
+    "bench-large": "npm run build && NODE_OPTIONS='--max-old-space-size=4096' vitest run bench-large.spec.ts --reporter=verbose",
     "lint": "tsc && tsc -p test",
     "build": "tsup index.ts --format esm,cjs --dts"
   },
@@ -44,6 +43,7 @@
     "@types/lodash": "^4.17.26",
     "@types/node": "^22.20.5",
     "deep-equality-data-structures": "^2.0.0",
+    "fast-check": "^4.10.2",
     "hash-it": "^7.1.1",
     "immutable": "^5.1.9",
     "lodash": "^4.18.1",

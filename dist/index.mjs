@@ -82,7 +82,15 @@ var _shash = (value, hash) => {
   }
   return _mix(hash, objHash);
 };
+var _key = (value) => _shash(value, 2166136261) | 0;
+var Bucket = class {
+  items;
+  constructor(first, second) {
+    this.items = [first, second];
+  }
+};
 var MapSet = class {
+  // A lone value is stored inline; a `Bucket` replaces it only on a key collision.
   #map;
   #size;
   constructor(iterable = []) {
@@ -96,42 +104,55 @@ var MapSet = class {
     }
   }
   add(value) {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) {
-      this.#map.set(hash, [value]);
-      this.#size++;
-    } else {
-      for (const item of bucket) {
+    const key = _key(value);
+    const slot = this.#map.get(key);
+    if (slot === void 0 && !this.#map.has(key)) {
+      this.#map.set(key, value);
+    } else if (slot instanceof Bucket) {
+      for (const item of slot.items) {
         if (equal(value, item)) return this;
       }
-      bucket.push(value);
-      this.#size++;
+      slot.items.push(value);
+    } else {
+      if (equal(value, slot)) return this;
+      this.#map.set(key, new Bucket(slot, value));
     }
+    this.#size++;
     return this;
   }
   has(value) {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) return false;
-    for (const item of bucket) {
-      if (equal(value, item)) return true;
+    const key = _key(value);
+    const slot = this.#map.get(key);
+    if (slot instanceof Bucket) {
+      for (const item of slot.items) {
+        if (equal(value, item)) return true;
+      }
+      return false;
     }
-    return false;
+    if (slot === void 0) return value === void 0 && this.#map.has(key);
+    return equal(value, slot);
   }
   delete(value) {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) return false;
-    for (let i = 0; i < bucket.length; i++) {
-      if (equal(value, bucket[i])) {
-        bucket.splice(i, 1);
-        if (bucket.length === 0) this.#map.delete(hash);
-        this.#size--;
-        return true;
+    const key = _key(value);
+    const slot = this.#map.get(key);
+    if (slot instanceof Bucket) {
+      const items = slot.items;
+      for (let i = 0; i < items.length; i++) {
+        if (equal(value, items[i])) {
+          items.splice(i, 1);
+          if (items.length === 1) this.#map.set(key, items[0]);
+          this.#size--;
+          return true;
+        }
       }
+      return false;
     }
-    return false;
+    if (slot === void 0 ? value !== void 0 || !this.#map.has(key) : !equal(value, slot)) {
+      return false;
+    }
+    this.#map.delete(key);
+    this.#size--;
+    return true;
   }
   get size() {
     return this.#size;
@@ -141,15 +162,23 @@ var MapSet = class {
     this.#size = 0;
   }
   forEach(callback, thisArg) {
-    for (const bucket of this.#map.values()) {
-      for (const value of bucket) {
-        callback.call(thisArg, value, value, this);
+    for (const slot of this.#map.values()) {
+      if (slot instanceof Bucket) {
+        for (const value of slot.items) {
+          callback.call(thisArg, value, value, this);
+        }
+      } else {
+        callback.call(thisArg, slot, slot, this);
       }
     }
   }
   *values() {
-    for (const bucket of this.#map.values()) {
-      yield* bucket;
+    for (const slot of this.#map.values()) {
+      if (slot instanceof Bucket) {
+        yield* slot.items;
+      } else {
+        yield slot;
+      }
     }
   }
   *[Symbol.iterator]() {
