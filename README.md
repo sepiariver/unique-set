@@ -1,8 +1,10 @@
 # @sepiariver/unique-set
 
-Unique set is highly-performant, given the workload. It uses a streaming structural hash to optimize deep equality checks. Every hash match is confirmed with a deep comparison using [fast-equals](https://www.npmjs.com/package/fast-equals), so a hash collision never produces a wrong result (see [Collision safety](PERF.md#collision-safety)).
+- {{ TODO: qualify this statement "Fastest deep equality set implementation on npm as of 2026-10-12. (See benchmarks in [PERF.md](PERF.md))" }}
+- 100% collision safety with deep equality checks (see [PERF.md#collision-safety](PERF.md#collision-safety))
+- Built-ins hash by content: URL, Error, typed arrays, ArrayBuffer, DataView, boxed primitives, and React/Preact elements.
 
-Supports ESM and CommonJS. Thanks [@sakgoyal](https://github.com/sakgoyal) for contributing to and instigating ESM support.
+Supports ESM and CommonJS.
 
 ```js
 import { MapSet, UniqueSet } from '@sepiariver/unique-set';
@@ -73,6 +75,11 @@ set.size; // 1
   - **`Map` values**: Insertion order is ignored. Both keys and values are compared by deep equality.
   - **Primitives**: `NaN === NaN`. `0` and `-0` are treated as equal.
   - **Functions and symbols**: Compared by reference. They hash by their string representation (`String(value)`), so same-source functions may land in the same bucket, but `fast-equals` uses `===` for the final check.
+- **Circular references**: Supported. This entry is the canonical description of how they are handled; change it here and nowhere else.
+  - A value nested more than 256 objects deep, which includes every circular value, is hashed from its top 3 levels only and compared with `fast-equals`' `circularDeepEqual` semantics. Such values that agree in their top 3 levels share a bucket and are told apart by comparison, one by one.
+  - `circularDeepEqual` pairs each object with its counterpart, so two values are equal only when their cycles line up: `a = { self: a }` equals `{ self: b }` where `b = { self: b }`, but `x = [x]` does not equal `[[y]]` where `y = [y]`.
+  - UniqueSet uses its own copy of that pairing check, because the one in `fast-equals` 6.1.1 overflows the stack on some equal `Set`s and `Map`s that contain themselves, when their insertion orders differ.
+  - Comparing two equal acyclic values still overflows the stack once they are nested deep enough: about 1,300 levels in Node.js 24 with the default stack size.
 
 ## Installation
 
@@ -141,6 +148,9 @@ Issue reporting is encouraged: [https://github.com/sepiariver/unique-set/issues]
 Submit pull requests to [https://github.com/sepiariver/unique-set/pulls]
 
 ## Contributors
+
+Thanks [@sakgoyal](https://github.com/sakgoyal) for contributing to and instigating ESM support.
+Thanks Opus 4.5 through 5.5 for research, analysis, insights and contributions to performance optimization.
 
 - @sepiariver
 - @sakgoyal

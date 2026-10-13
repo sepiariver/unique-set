@@ -10,7 +10,7 @@
     "import": "./dist/index.mjs"
   },
   "scripts": {
-    "test": "npm run build && vitest run basic.spec.ts extra.spec.ts property.spec.ts datasets.spec.ts",
+    "test": "npm run build && vitest run basic.spec.ts extra.spec.ts property.spec.ts datasets.spec.ts set-parity.spec.ts",
     "bench": "npm run build && vitest bench --run",
     "bench-large": "npm run build && NODE_OPTIONS='--max-old-space-size=4096' vitest run bench-large.spec.ts --reporter=verbose",
     "lint": "tsc && tsc -p test",
