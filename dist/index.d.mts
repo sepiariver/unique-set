@@ -1,3 +1,8 @@
+/**
+ * A 32-bit FNV-1a hash computed by traversing the value, without building an intermediate
+ * string. Hashes of objects compared by reference hold only within one process (README.md,
+ * "Objects compared by reference").
+ */
 declare const structuralHash: (value: unknown) => number;
 /**
  * What the set-algebra methods accept as their argument, as in the ES2025 `Set` methods: any

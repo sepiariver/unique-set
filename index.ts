@@ -1,14 +1,13 @@
 import { createCustomEqual, type EqualityComparator, type State } from "fast-equals";
 
-/**
- * Streaming structural hash — computes a 32-bit FNV-1a hash by traversing
- * the value directly, without allocating an intermediate string. Objects that fast-equals
- * compares by reference hash by identity, so their hash holds only within one process (see
- * "Objects compared by reference" in the README's Considerations).
- */
 const _f64 = new Float64Array(1);
 const _u8 = new Uint8Array(_f64.buffer);
 
+/**
+ * A 32-bit FNV-1a hash computed by traversing the value, without building an intermediate
+ * string. Hashes of objects compared by reference hold only within one process (README.md,
+ * "Objects compared by reference").
+ */
 export const structuralHash = (value: unknown): number => {
   return _hashRoot(value) >>> 0;
 };
@@ -21,18 +20,16 @@ const MAX_DEPTH = 256;
 
 /**
  * Object nesting at which a value past `MAX_DEPTH` is cut off. Cutting by depth alone keeps
- * the hash a function of the value's unfolding, which every value fast-equals' circular
- * comparator calls equal shares. Hashing a back-reference as a constant would not: the
- * comparator calls `a = { self: a }` equal to `{ self: b }` with `b = { self: b }`, whose
- * cycles close at different depths.
+ * the hash a function of the value's unfolding, which all values fast-equals' circular
+ * comparator calls equal share. Hashing a back-reference as a constant would not, because
+ * equal cycles can close at different depths (README.md, "Circular references").
  */
 const CUT_DEPTH = 3;
 
 /**
  * fast-equals' cycle check, except that it restores the pairing it overwrites. fast-equals 6.1.1
  * deletes it instead, so when Set or Map matching tries a wrong candidate first, a cycle through
- * the outer pair goes unnoticed and recursion overflows the stack (for example, comparing two
- * equal Sets that hold themselves and each other, in different insertion orders).
+ * the outer pair goes unnoticed and recursion overflows the stack.
  */
 const _pairing =
   (areItemsEqual: EqualityComparator<undefined>): EqualityComparator<undefined> =>
@@ -52,9 +49,8 @@ const _pairing =
   };
 
 /**
- * The bytes a `DataView` covers. A view whose buffer has shrunk below it, or been detached,
- * throws on `byteOffset` and `byteLength`, so it reads as the empty view at offset 0, which is
- * what an out-of-bounds typed array reports itself as.
+ * The bytes a `DataView` covers, or none when its buffer has shrunk below it or been detached,
+ * which makes its getters throw. An out-of-bounds typed array likewise reads as empty.
  */
 const _viewBytes = (view: DataView): Uint8Array => {
   try {
@@ -226,14 +222,14 @@ const _shashDate = (value: Date, hash: number): number => {
   return hash;
 };
 
-/** `DataView`s compare by the bytes they cover and their `byteOffset`, which is not hashed. */
+/** By the bytes covered. `byteOffset` is compared but not hashed. */
 const _shashDataView = (value: DataView, hash: number): number =>
   _mixBytes(_mix(hash, 0x18), _viewBytes(value));
 
-/** Typed arrays and `DataView`, which compare by contents and `byteOffset`. */
+/** Typed arrays and `DataView`s. */
 const _shashView = (value: ArrayBufferView, hash: number, depth: number): number => {
   if (_typedArrayTag.call(value) === undefined) return _shashDataView(value as DataView, hash);
-  // Elements compare with `!==`, and NaN equals NaN in float arrays; the number path
+  // Elements compare with `!==`, except that NaN equals NaN in float arrays; the number path
   // normalizes NaN and -0 to match. `byteOffset` is compared but not hashed.
   hash = _mix(hash, 0x16);
   const items = value as unknown as ArrayLike<number | bigint>;
@@ -259,8 +255,7 @@ const _shashTagged = (value: object, hash: number, depth: number): number => {
     case "[object Arguments]":
       return _shashKeys(value, hash, depth);
     case "[object Error]": {
-      // Compared by `name`, `message`, `stack`, `cause` and own enumerable keys. `stack` is left
-      // out, since it costs a long string per error and differs by construction site anyway.
+      // `stack` is compared but not hashed: it costs a long string per error.
       const error = value as Error;
       hash = _shash(error.name, _mix(hash, 0x19), depth);
       hash = _shash(error.message, hash, depth);
@@ -509,13 +504,10 @@ const _keysOf = <T>(rec: SetRecord<T>): Iterable<T> => {
 };
 
 export class MapSet<T> {
-  // A lone value is stored inline; a `Bucket` replaces it only on a key collision.
   #map: Map<number, T | Bucket<T>>;
   #size: number;
-  // The stored value the last `add()` matched, while `#probing`. Runs of duplicates that are
-  // shallow copies of one value share every nested reference, which `shallowEqual` checks
-  // with `Object.is` far faster than the value can be hashed. Its `true` implies `deepEqual`,
-  // and it never recurses, so it is also safe on circular values.
+  // The stored value the last `add()` matched, while `#probing`, for the duplicate probe
+  // (PERF.md, Notes).
   #last: T | undefined = undefined;
   #probing = false;
 
@@ -653,8 +645,7 @@ export class MapSet<T> {
   // Set algebra, following the ES2025 `Set` methods step for step: `other` is read through
   // `_setRecord`, the smaller side drives the loop where the spec says so, and every result is a
   // new `MapSet`. Values from this set keep their map key, so they are never hashed again.
-  // Where `other.has()` decides membership, its own notion of equality applies: a `Set` argument
-  // matches objects by reference.
+  // `other.has()` brings its own equality (README.md, "Differences from native `Set`").
 
   /** A copy sharing no buckets with this set, so either can change without affecting the other. */
   #copy(): MapSet<T> {

@@ -341,8 +341,7 @@ describe("circular values", () => {
     .map(([v, picks, seed]) => withCycles(v, picks, seed))
     .filter((graph) => graph !== undefined);
 
-  // The invariant above for values nested past MAX_DEPTH, which compare with MapSet's
-  // corrected circularDeepEqual.
+  // The invariant above, for values on the depth-limited path.
   it("gives an isomorphic copy the same hash and one MapSet entry", () => {
     fc.assert(
       fc.property(cyclic, fc.nat(), (v, seed) => {

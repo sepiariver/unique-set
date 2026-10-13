@@ -16,8 +16,7 @@ const fromDataset = (kind: string, dataset: Dataset): Workload => ({
   expectedSize: dataset.expectedSize,
 });
 
-// Each workload states its expected unique size up front, so a library that disagrees with
-// unique-set's equality semantics is reported instead of looking faster.
+// Expected sizes drive the correctness gate (PERF.md, Method).
 const workloads: Workload[] = [
   fromDataset("flat mixed", flatDataset(20_000)),
   fromDataset("nested", nestedDataset(20_000)),
@@ -47,7 +46,6 @@ const workloads: Workload[] = [
     expectedSize: 1_000,
   },
   (() => {
-    // Each duplicate is a mirrored structured clone, so it shares no reference with its original.
     const records = corpusRecords(5);
     return {
       name: `WPT, devalue and superjson value mix: ${count(records.length)} unique + cloned duplicates`,
@@ -56,8 +54,7 @@ const workloads: Workload[] = [
     };
   })(),
   {
-    // fast-equals compares URLSearchParams by reference, and they have no enumerable state to
-    // hash, so all of them share one MapSet key. Each repeat is the same reference.
+    // fast-equals compares URLSearchParams by reference, so each repeat is the same reference.
     name: "devalue URLSearchParams: 1,000 unique + repeated references",
     items: withMirroredDuplicates(
       Array.from({ length: 1_000 }, (_, i) => new URLSearchParams(`foo=${i}&foo=2&baz=<+>`)),

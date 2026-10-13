@@ -367,13 +367,10 @@ var _keysOf = (rec) => {
   return { [Symbol.iterator]: () => iterator };
 };
 var MapSet = class _MapSet {
-  // A lone value is stored inline; a `Bucket` replaces it only on a key collision.
   #map;
   #size;
-  // The stored value the last `add()` matched, while `#probing`. Runs of duplicates that are
-  // shallow copies of one value share every nested reference, which `shallowEqual` checks
-  // with `Object.is` far faster than the value can be hashed. Its `true` implies `deepEqual`,
-  // and it never recurses, so it is also safe on circular values.
+  // The stored value the last `add()` matched, while `#probing`, for the duplicate probe
+  // (PERF.md, Notes).
   #last = void 0;
   #probing = false;
   constructor(iterable) {
@@ -492,8 +489,7 @@ var MapSet = class _MapSet {
   // Set algebra, following the ES2025 `Set` methods step for step: `other` is read through
   // `_setRecord`, the smaller side drives the loop where the spec says so, and every result is a
   // new `MapSet`. Values from this set keep their map key, so they are never hashed again.
-  // Where `other.has()` decides membership, its own notion of equality applies: a `Set` argument
-  // matches objects by reference.
+  // `other.has()` brings its own equality (README.md, "Differences from native `Set`").
   /** A copy sharing no buckets with this set, so either can change without affecting the other. */
   #copy() {
     const copy = new _MapSet();

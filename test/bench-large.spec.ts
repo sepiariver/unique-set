@@ -1,5 +1,4 @@
-// Opt-in scale test (`npm run bench-large`): 5 million nested values, timed once against the native
-// Set as a floor. Native Set compares by reference, so it keeps every item, duplicates included.
+// Opt-in scale test, described in PERF.md, "Scale test".
 import { MapSet } from "../dist/index.mjs";
 import { describe, it, expect } from "vitest";
 import { nestedDataset } from "./fixtures/datasets";

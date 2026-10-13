@@ -370,8 +370,7 @@ describe("out-of-bounds and detached DataViews", () => {
   });
 });
 
-// Values nested past MAX_DEPTH, circular ones included, hash only their top CUT_DEPTH levels
-// and compare with fast-equals' circularDeepEqual.
+// The depth-limited path for values nested past MAX_DEPTH (README.md, "Circular references").
 describe("MapSet with circular and deeply nested values", () => {
   const selfRef = <T extends object>(make: (self: T) => void, value: T): T => {
     make(value);
@@ -414,9 +413,7 @@ describe("MapSet with circular and deeply nested values", () => {
     expect(set.size).toBe(2);
   });
 
-  // fast-equals pairs each object with its counterpart, so cycles of different lengths are
-  // unequal, but a cycle reached one level later is equal. A hash that cut a cycle where it
-  // closes would put these two in different buckets.
+  // A hash that cut a cycle where it closes would put the equal pair in different buckets.
   it("follows fast-equals on cycles that close at different depths", () => {
     const a: any = {};
     a.self = a;

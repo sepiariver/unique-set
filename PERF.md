@@ -12,8 +12,8 @@ This page compares **UniqueSet** (`@sepiariver/unique-set` 3.3.0) with other way
 
 The workloads come from two places:
 
-- **This repo's datasets** (`test/fixtures/datasets.ts`): 20,000 unique values plus 2,892 duplicates. The flat dataset mixes strings, 2-key objects and 2-element arrays; the nested dataset holds objects nested 3–4 levels, arrays of objects, and mixed structures. Each duplicate is a mirrored copy, with object keys in reverse order.
-- **Ported from other projects' benchmark and test suites** (`test/fixtures/`, provenance and licences in each file's header). The hash-it, lodash and superjson workloads hold every unique value once plus a mirrored duplicate, with object keys and Set/Map insertion order reversed. The ohash workloads instead reuse upstream's presets, which are shallow copies of a single object.
+- **This repo's datasets** (`test/fixtures/datasets.ts`): 20,000 unique values plus 2,892 duplicates. The flat dataset mixes strings, 2-key objects and 2-element arrays; the nested dataset holds objects nested 3–4 levels, arrays of objects, and mixed structures. Each duplicate is a mirrored copy: a deep copy with object keys and Set/Map insertion order reversed (`mirror` in `test/competitors/workload.ts`).
+- **Ported from other projects' benchmark and test suites** (`test/fixtures/`, provenance and licences in each file's header). The hash-it, lodash and superjson workloads hold every unique value once plus a mirrored duplicate. The ohash workloads instead reuse upstream's presets, which are shallow copies of a single object.
 - **The value mix** repeats, five times, every value from WPT's structured clone battery and devalue's and superjson's round-trip fixtures that equals its own structured clone and is neither circular nor larger than 1,000 elements: 189 values, wrapped as `{ round, entry, value }` so that each record is distinct. Each duplicate is a mirrored `structuredClone`, so it shares no reference with its original. The same values drive `test/corpus.spec.ts`.
 - **devalue URLSearchParams** holds 1,000 `URLSearchParams`, each repeated by reference.
 
@@ -23,19 +23,19 @@ Time to build a deduplicated collection from every item in the workload.
 
 | Workload | UniqueSet | DeepSet | immutable | @rimbu/hashed | ohash + Map | hash-it + Map | lodash `uniqWith` |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| flat mixed, 20,000 unique | **1.73 ms** | 64.99 ms | 16.42 ms | 10.91 ms | 10.91 ms | 3.73 ms | — |
-| nested, 20,000 unique | **4.77 ms** | 293.78 ms | 56.64 ms | 25.08 ms | 21.82 ms | 13.16 ms | — |
-| hash-it records, 5,000 unique | **12.33 ms** | 305.85 ms | 105.15 ms | 29.26 ms | 33.12 ms | 22.94 ms | — |
-| hash-it records, 1,000 unique | **2.45 ms** | 63.00 ms | 19.69 ms | 5.10 ms | 5.96 ms | 4.12 ms | 350.53 ms |
-| hash-it stairs, 100 deep, 200 unique | **1.74 ms** | 114.83 ms | 21.51 ms | 5.64 ms | 4.01 ms | 4.02 ms | 2,575.19 ms |
-| lodash near-misses, 1,000 unique | **2.79 ms** | 93.42 ms | 31.05 ms | 7.17 ms | 5.76 ms | 4.05 ms | 789.59 ms |
-| superjson Date records, 1,000 unique | **9.69 ms** | 413.08 ms | 78.92 ms | 25.16 ms | 88.79 ms | 21.67 ms | 583.80 ms |
-| value mix, 945 unique | **0.58 ms** | ✗ ⁴ | ✗ 1,095 ⁶ | ✗ 1,000 ⁶ | ✗ ⁵ | ✗ 950 ⁶ | ✗ 960 ⁶ |
-| devalue URLSearchParams, 1,000 unique | **0.21 ms** | ✗ ⁴ | ✗ 1 ⁶ | 1.50 ms | 1.49 ms | ✗ 1 ⁶ | 328.02 ms |
-| ohash small, 1,024 copies | **0.10 ms** | 9.25 ms | 1.90 ms | 0.42 ms | 1.09 ms | 0.32 ms | 0.27 ms |
-| ohash small circular, 1,024 copies | **0.19 ms** | 15.99 ms | ✗ ² | ✗ ¹ | 1.64 ms | 0.74 ms | 0.30 ms |
-| ohash large, 512 copies | **0.54 ms** | ✗ ³ | 13.36 ms | 5.41 ms | 5.04 ms | 3.03 ms | 0.68 ms |
-| ohash large circular, 512 copies | 0.96 ms | ✗ ³ | ✗ ² | ✗ ¹ | 445.34 ms | 613.72 ms | **0.68 ms** |
+| flat mixed, 20,000 unique | **1.72 ms** | 66.19 ms | 16.89 ms | 11.17 ms | 10.64 ms | 3.60 ms | — |
+| nested, 20,000 unique | **5.16 ms** | 295.17 ms | 59.31 ms | 25.15 ms | 22.09 ms | 12.99 ms | — |
+| hash-it records, 5,000 unique | **13.09 ms** | 311.80 ms | 103.54 ms | 27.83 ms | 34.64 ms | 21.39 ms | — |
+| hash-it records, 1,000 unique | **2.48 ms** | 62.11 ms | 20.03 ms | 5.30 ms | 5.85 ms | 3.96 ms | 345.32 ms |
+| hash-it stairs, 100 deep, 200 unique | **1.77 ms** | 115.24 ms | 22.31 ms | 5.66 ms | 3.95 ms | 3.92 ms | 2,647.03 ms |
+| lodash near-misses, 1,000 unique | **2.80 ms** | 92.85 ms | 29.49 ms | 7.09 ms | 5.66 ms | 4.04 ms | 778.53 ms |
+| superjson Date records, 1,000 unique | **10.36 ms** | 423.20 ms | 76.19 ms | 24.82 ms | 88.55 ms | 21.46 ms | 574.77 ms |
+| value mix, 945 unique | **0.57 ms** | ✗ ⁴ | ✗ 1,095 ⁶ | ✗ 1,000 ⁶ | ✗ ⁵ | ✗ 950 ⁶ | ✗ 960 ⁶ |
+| devalue URLSearchParams, 1,000 unique | **0.21 ms** | ✗ ⁴ | ✗ 1 ⁶ | 1.49 ms | 1.55 ms | ✗ 1 ⁶ | 326.67 ms |
+| ohash small, 1,024 copies | **0.10 ms** | 9.54 ms | 2.02 ms | 0.41 ms | 1.06 ms | 0.32 ms | 0.27 ms |
+| ohash small circular, 1,024 copies | **0.19 ms** | 17.09 ms | ✗ ² | ✗ ¹ | 1.65 ms | 0.75 ms | 0.29 ms |
+| ohash large, 512 copies | **0.53 ms** | ✗ ³ | 13.01 ms | 5.30 ms | 4.99 ms | 3.05 ms | 0.68 ms |
+| ohash large circular, 512 copies | 0.96 ms | ✗ ³ | ✗ ² | ✗ ¹ | 446.61 ms | 591.45 ms | **0.66 ms** |
 
 ## Lookup
 
@@ -43,7 +43,7 @@ Time to call `has()` once for every item in the nested dataset, on a collection 
 
 | Lookup workload | UniqueSet | DeepSet | immutable | @rimbu/hashed | ohash + Map | hash-it + Map | lodash `isEqual` scan |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| nested, 11,446 stored, 22,892 queries (11,446 hits) | **6.15 ms** | 297.13 ms | 63.96 ms | 15.42 ms | 20.52 ms | 12.05 ms | — |
+| nested, 11,446 stored, 22,892 queries (11,446 hits) | **6.03 ms** | 298.71 ms | 74.90 ms | 16.57 ms | 21.46 ms | 12.48 ms | — |
 
 ## Failures and skipped runs
 
@@ -60,13 +60,13 @@ A dash (—) means the workload was not run. lodash compares every pair of items
 
 ## Findings
 
-- UniqueSet is the fastest on every workload except ohash large circular. Where another library also completes the workload correctly, its margin over the next library ranges from 1.25× to 2.8× for deduplication, is 7.0× on devalue URLSearchParams, and is 2.0× for lookup. The next library is hash-it + Map on this repo's, hash-it's, lodash's and superjson's workloads (ohash + Map ties it on hash-it stairs), ohash + Map on devalue URLSearchParams, and lodash on ohash's.
-- Against DeepSet, UniqueSet is 25× to 91× faster for deduplication and 48× faster for lookup.
+- UniqueSet is the fastest on every workload except ohash large circular. Where another library also completes the workload correctly, its margin over the next library ranges from 1.3x to 2.6x for deduplication, is 7.1x on devalue URLSearchParams, and is 2.1x for lookup. The next library is hash-it + Map on this repo's, hash-it's, lodash's and superjson's workloads, @rimbu/hashed on devalue URLSearchParams, and lodash on ohash's.
+- Against DeepSet, UniqueSet is 24x to 94x faster for deduplication and 50x faster for lookup.
 - UniqueSet is the only library that returns the expected size on the value mix. See [Semantic differences](#semantic-differences).
 - `fast-equals` compares a `URLSearchParams` by reference, so UniqueSet hashes each one by its identity and gives it its own key (see [objects compared by reference](README.md#considerations)).
 - Every ohash workload is shallow copies of one object, so the copies share every nested value by reference. lodash compares each copy against the one value it keeps, and `isEqual` stops at each shared reference with `===`. UniqueSet checks a shallow copy of the value it last matched the same way before hashing it (see [Notes](#notes)), so it leads on three of the four ohash workloads.
-- On ohash large circular, lodash is 1.4× faster (0.68 ms against 0.96 ms). UniqueSet has to hash the first two copies to store one and recognise the other, and hashing one circular copy of this preset takes 205 µs (measured separately on the same machine), which accounts for the gap. These copies take the depth-limited path described under [Circular references](README.md#considerations).
-- UniqueSet completes both circular workloads. On the large preset it is 466× faster than ohash + Map and 642× faster than hash-it + Map. immutable and @rimbu/hashed do not support circular references.
+- On ohash large circular, lodash is 1.5x faster (0.66 ms against 0.96 ms). UniqueSet has to hash the first two copies to store one and recognise the other, and hashing one circular copy of this preset takes 205 µs (measured separately on the same machine), which accounts for the gap. These copies take the depth-limited path described under [Circular references](README.md#considerations).
+- UniqueSet completes both circular workloads. On the large preset it is 466x faster than ohash + Map and 618x faster than hash-it + Map. immutable and @rimbu/hashed do not support circular references.
 - Outside the value mix and the URLSearchParams workload, every library that completed a workload returned the expected size or hit count.
 - The hash-keyed `Map` libraries never check equality, which is part of why they are fast. See [Collision safety](#collision-safety).
 
@@ -86,7 +86,7 @@ On the URLSearchParams workload, immutable and hash-it + Map return a size of 1.
 
 ## Collision safety
 
-A library that keys values by a hash alone treats two distinct values with the same hash as duplicates. `add()` silently drops the second value, and `has()` reports a value as present when it is not. A library that confirms every hash match with an equality check gets a correct result whatever the hash quality, and collisions only cost time.
+A library that keys values by a hash alone treats two distinct values with the same hash as duplicates. `add()` silently drops the second value, and `has()` reports a value as present when it is not. `UniqueSet`, which confirms every hash match with an equality check, gets a correct result regardless of hash quality, and collisions only cost time. Many hash algorithms and pre-filters were tested in previous versions of `UniqueSet`. The current version is the fastest and most reliable among them, and against broadly adopted competitors.
 
 | Library                      | Hash                                  | Hash match confirmed by equality?                        | Effect of a collision                  |
 | :--------------------------- | :------------------------------------ | :------------------------------------------------------- | :------------------------------------- |
@@ -98,17 +98,16 @@ A library that keys values by a hash alone treats two distinct values with the s
 | hash-it + `Map`              | 53-bit integer                        | No                                                       | Distinct value lost                    |
 | lodash `uniqWith(isEqual)`   | None                                  | Not applicable: every pair is compared                   | Cannot collide; O(n²)                  |
 
-UniqueSet compares a value nested past 256 levels, which includes every circular value, with a corrected copy of `circularDeepEqual`. The duplicate check described in [Notes](#notes) uses `shallowEqual`, which returns `true` only for values that `deepEqual` also accepts.
+UniqueSet's other comparisons keep that guarantee: the corrected `circularDeepEqual` of the depth-limited path (see [Circular references](README.md#considerations)) and the `shallowEqual` probe in [Notes](#notes).
 
-With a 128-bit or 256-bit digest, a collision is vanishingly unlikely in practice, although nothing in the design rules it out. A 53-bit hash is a different matter: by the birthday bound, 10 million distinct values have about a 0.55% chance of at least one collision. UniqueSet's 32-bit hash collides far more often (see the collision estimate in the [README](README.md#considerations)), which is why it confirms every match.
+With a 128-bit or 256-bit digest, a collision is highly unlikely in practice, although not impossible. A 53-bit hash is a different matter: by the birthday bound, 10 million distinct values have about a 0.55% chance of at least one collision. UniqueSet's 32-bit hash collides far more often (see the collision estimate in the [README](README.md#considerations)). By confirming every match, it trades hash quality for speed while maintaining correctness.
 
 ## Scale test
 
 `npm run bench-large` runs `test/bench-large.spec.ts`, an opt-in test outside the method above. It adds 5,000,998 nested items (5,000,000 unique, from the same generator as the nested dataset) to a UniqueSet and to a native `Set`, timing one pass of each. Native `Set` compares by reference, so it keeps every item and serves only as a floor. The script raises the Node.js heap limit to 4 GB.
 
-One run in the environment from [Method](#method): UniqueSet 2,379 ms, native `Set` 209 ms.
+One run in the environment from [Method](#method): UniqueSet 2,219 ms, native `Set` 293 ms.
 
 ## Notes
 
-- **UniqueSet** uses a streaming 32-bit FNV-1a structural hash and confirms every hash match with `fast-equals` (see [Collision safety](#collision-safety)). O(1) average for both `add()` and `has()`. After `add()` finds a duplicate, the next `add()` first compares the new value with the stored value it matched using `fast-equals` `shallowEqual`, which checks top-level members by reference. A shallow copy of that value is then recognised without being hashed, and any other value fails the check after its top level.
-- **DeepSet** (`deep-equality-data-structures`) hashes values with `object-hash` (MD5 by default) for O(1) lookups. The performance gap comes from MD5 being a cryptographic hash and `object-hash` serializing values before hashing.
+**UniqueSet**: after `add()` finds a duplicate, the next `add()` first compares the new value with the stored value it matched, using `fast-equals` `shallowEqual`, which checks top-level members by reference. A shallow copy of that value is recognised without being hashed, and any other value fails the check after its top level. `shallowEqual` returns `true` only for values that `deepEqual` also accepts, and it never recurses, so the probe is safe on circular values.
