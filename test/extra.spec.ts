@@ -22,8 +22,8 @@ describe("collision fixtures", () => {
   });
 });
 
-describe("MapSet collision buckets", () => {
-  it("stores colliding values separately and deduplicates within a bucket", () => {
+describe("MapSet with colliding values", () => {
+  it("stores colliding values separately and deduplicates among them", () => {
     const set = new MapSet<unknown>([strA, strB, strA, strB]);
     expect(set.size).toBe(2);
     expect(set.has(strA)).toBe(true);
@@ -37,17 +37,17 @@ describe("MapSet collision buckets", () => {
     expect(objects.has({ s: "other" })).toBe(false);
   });
 
-  it("misses a value that shares a key with an inline or bucketed value", () => {
+  it("misses a value that shares a key with one or several stored values", () => {
     const set = new MapSet<unknown>([undefA]);
-    expect(set.has(undefB)).toBe(false); // same key, inline slot
+    expect(set.has(undefB)).toBe(false); // same key, lone value
     expect(set.delete(undefB)).toBe(false);
     set.add(undefB);
-    expect(set.has(undefC)).toBe(false); // same key, bucket
+    expect(set.has(undefC)).toBe(false); // same key, several values
     expect(set.delete(undefC)).toBe(false);
     expect(set.size).toBe(2);
   });
 
-  it("collapses a bucket on delete and rebuilds it on add", () => {
+  it("keeps the remaining value's place on delete, and appends a re-added one", () => {
     const set = new MapSet<unknown>([strA, strB]);
     expect(set.delete(strA)).toBe(true);
     expect(set.size).toBe(1);
@@ -65,16 +65,23 @@ describe("MapSet collision buckets", () => {
     expect([...set]).toEqual([]);
   });
 
-  it("deletes from the middle of a bucket of three", () => {
+  it("deletes the middle of three values that share a key", () => {
     const set = new MapSet<unknown>(collidingWithUndefined);
     expect(set.delete(undefB)).toBe(true);
     expect([...set]).toEqual([undefA, undefC]);
     expect(set.size).toBe(2);
   });
 
-  it("yields a colliding value next to its bucket-mate", () => {
+  it("iterates colliding values in insertion order", () => {
     const set = new MapSet(["first", strA, "middle", strB, "last"]);
-    expect([...set]).toEqual(["first", strA, strB, "middle", "last"]);
+    expect([...set]).toEqual(["first", strA, "middle", strB, "last"]);
+
+    // Deleting the first of the pair keeps the second where it was.
+    set.delete(strA);
+    set.add("after");
+    expect([...set]).toEqual(["first", "middle", strB, "last", "after"]);
+    set.add(strA);
+    expect([...set]).toEqual(["first", "middle", strB, "last", "after", strA]);
 
     const seen: string[] = [];
     set.forEach((value, valueAgain, self) => {
@@ -98,7 +105,7 @@ describe("MapSet with undefined", () => {
     expect(set.size).toBe(1);
   });
 
-  it("shares a bucket with values that collide with it", () => {
+  it("shares a key with values that collide with it", () => {
     const set = new MapSet<unknown>([undefined, undefined]);
     expect(set.size).toBe(1);
     expect(set.has(undefA)).toBe(false);
@@ -114,7 +121,7 @@ describe("MapSet with undefined", () => {
     expect(set.has(undefA)).toBe(true);
     expect([...set]).toEqual([undefA]);
 
-    // The bucket has collapsed back to the inline string; undefined can join it again.
+    // The string is alone at the key again; undefined can join it.
     set.add(undefined);
     expect([...set]).toEqual([undefA, undefined]);
     expect(set.delete(undefA)).toBe(true);
@@ -322,16 +329,37 @@ describe("objects compared by their toString tag", () => {
   });
 
   it("agrees with fast-equals on objects that only borrow a built-in's tag", () => {
-    const lookAlike = (tag: string, extra: object = {}) =>
-      Object.assign(new (class {
+    // One class per tag. fast-equals tells objects of different classes apart before it reads the
+    // tag, so a class per object would never reach the tagged comparison under test. Date is left
+    // out because fast-equals throws on a look-alike, which has no getTime().
+    const tags = ["Map", "Set", "RegExp", "URL", "Number", "Error", "DataView", "Uint8Array", "Array"];
+    for (const tag of tags) {
+      class LookAlike {
         get [Symbol.toStringTag]() {
           return tag;
         }
-      })(), extra);
-    const values = ["Map", "Set", "Date", "RegExp", "URL", "Number", "DataView", "Uint8Array", "Array"].flatMap(
-      (tag) => [lookAlike(tag), lookAlike(tag), lookAlike(tag, { source: "a", flags: "" })],
-    );
-    expectFastEqualsClasses(values);
+      }
+      const make = (extra: object = {}) => Object.assign(new LookAlike(), extra);
+      const values = [make(), make(), make({ source: "a", flags: "" })];
+      // fast-equals compares boxed primitives by valueOf(), which for a look-alike is itself.
+      expect(deepEqual(values[0], values[1]), tag).toBe(tag !== "Number");
+      expectFastEqualsClasses(values);
+    }
+  });
+
+  it("gives URL look-alikes with the same href one key, whatever else they hold", () => {
+    class LookAlike {
+      get [Symbol.toStringTag]() {
+        return "URL";
+      }
+    }
+    const make = (query: string) =>
+      Object.assign(new LookAlike(), { href: "same", searchParams: new URLSearchParams(query) });
+    const [a, b] = [make("x=1"), make("x=2")];
+    expect(deepEqual(a, b)).toBe(true);
+    expect(structuralHash(a)).toBe(structuralHash(b));
+    expect(new MapSet([a, b]).size).toBe(1);
+    expect(new MapSet([a]).has(b)).toBe(true);
   });
 });
 
@@ -402,7 +430,7 @@ describe("MapSet with circular and deeply nested values", () => {
     expect(set.has(make(3))).toBe(false);
   });
 
-  it("tells circular values apart by a leaf below the cut-off, sharing a bucket", () => {
+  it("tells circular values apart by a leaf below the cut-off, sharing a key", () => {
     const make = (n: number) => {
       const root: any = { a: { b: { c: { d: { n } } } } };
       root.a.b.c.d.root = root;
@@ -413,7 +441,7 @@ describe("MapSet with circular and deeply nested values", () => {
     expect(set.size).toBe(2);
   });
 
-  // A hash that cut a cycle where it closes would put the equal pair in different buckets.
+  // A hash that cut a cycle where it closes would give the equal pair different keys.
   it("follows fast-equals on cycles that close at different depths", () => {
     const a: any = {};
     a.self = a;
@@ -461,6 +489,40 @@ describe("MapSet with circular and deeply nested values", () => {
     const set = new MapSet<unknown>([deep(1), deep(2), deep(1)]);
     expect(set.size).toBe(2);
     expect(set.has(deep(2))).toBe(true);
+  });
+});
+
+// A getter runs user code in the middle of hashing, and that code may hash too.
+describe("hashing re-entered from a getter", () => {
+  it("keeps circular comparison when a getter hashes another value", () => {
+    const make = () => {
+      const value: any = {
+        get n() {
+          return structuralHash(0);
+        },
+      };
+      value.self = value;
+      return value;
+    };
+    const set = new MapSet<unknown>([make()]);
+    expect(set.has(make())).toBe(true);
+    expect(set.delete(make())).toBe(true);
+  });
+
+  it("gives a lookup made from a getter its own depth limit", () => {
+    const value = { a: { b: { c: { d: 1 } } } };
+    const inner = new MapSet([value]);
+    const seen: boolean[] = [];
+    const outer: any = {
+      get n() {
+        seen.push(inner.has(value));
+        return 0;
+      },
+    };
+    outer.self = outer; // past MAX_DEPTH, so hashed again with the CUT_DEPTH limit
+    structuralHash(outer);
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.every(Boolean)).toBe(true);
   });
 });
 

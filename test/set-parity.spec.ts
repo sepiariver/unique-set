@@ -1,7 +1,9 @@
 import { MapSet, type SetLike } from "../dist/index.mjs";
+import { deepEqual } from "fast-equals";
 import fc from "fast-check";
+import vm from "node:vm";
 import { describe, it, expect } from "vitest";
-import { collidingStrings } from "./fixtures/collisions";
+import { collidingStrings, collidingWithUndefined } from "./fixtures/collisions";
 
 const [strA, strB] = collidingStrings;
 
@@ -72,6 +74,88 @@ describe("MapSet Set interface", () => {
 
   it("rejects a forEach callback that is not a function, even when empty", () => {
     expect(() => new MapSet().forEach(null as never)).toThrow(TypeError);
+  });
+});
+
+// Primitives, on which deep equality and native Set's SameValueZero agree, several of them
+// sharing a key, so that colliding values are added and deleted mid-iteration.
+const primitive = fc.constantFrom<unknown>(undefined, ...collidingStrings, ...collidingWithUndefined, 0, 1, "x");
+const mutation = fc.tuple(fc.constantFrom("add", "delete", "none"), primitive);
+type Mutation = [string, unknown];
+
+/** Applies `ops[0]` to `set` and drops it, so each mutation runs once. */
+function mutate(set: { add(v: unknown): unknown; delete(v: unknown): unknown }, ops: Mutation[]): void {
+  const op = ops.shift();
+  if (op?.[0] === "add") set.add(op[1]);
+  else if (op?.[0] === "delete") set.delete(op[1]);
+}
+
+describe("MapSet iteration while the set changes", () => {
+  it("matches native Set step for step, with several iterators open", () => {
+    const op = fc.oneof(
+      mutation,
+      fc.tuple(fc.constant("clear"), fc.constant(null)),
+      fc.tuple(fc.constant("open"), fc.constant(null)),
+      fc.tuple(fc.constant("next"), fc.nat(3)),
+    );
+    fc.assert(
+      fc.property(fc.array(primitive), fc.array(op, { maxLength: 80 }), (initial, ops) => {
+        const mine = new MapSet<unknown>(initial);
+        const theirs = new Set<unknown>(initial);
+        const open: [Iterator<unknown>, Iterator<unknown>][] = [];
+        for (const [kind, arg] of ops) {
+          if (kind === "add") {
+            mine.add(arg);
+            theirs.add(arg);
+          } else if (kind === "delete") {
+            expect(mine.delete(arg)).toBe(theirs.delete(arg));
+          } else if (kind === "clear") {
+            mine.clear();
+            theirs.clear();
+          } else if (kind === "open") {
+            open.push([mine.values(), theirs.values()]);
+          } else if (kind === "next" && open.length > 0) {
+            const [m, t] = open[(arg as number) % open.length]!;
+            expect(m.next()).toEqual(t.next());
+          }
+          expect(mine.size).toBe(theirs.size);
+        }
+        expect([...mine]).toEqual([...theirs]);
+        for (const [m, t] of open) {
+          for (let step = t.next(); ; step = t.next()) {
+            expect(m.next()).toEqual(step);
+            if (step.done) break;
+          }
+        }
+      }),
+      { numRuns: 1000 },
+    );
+  });
+
+  it("visits what native Set's forEach visits when the callback changes the set", () => {
+    fc.assert(
+      fc.property(fc.array(primitive), fc.array(mutation, { maxLength: 30 }), (initial, ops) => {
+        const visit = (set: MapSet<unknown> | Set<unknown>) => {
+          const seen: unknown[] = [];
+          const pending = ops.slice();
+          set.forEach((value: unknown) => {
+            seen.push(value);
+            mutate(set, pending);
+          });
+          return seen;
+        };
+        expect(visit(new MapSet<unknown>(initial))).toEqual(visit(new Set<unknown>(initial)));
+      }),
+    );
+  });
+
+  it("visits a colliding value added while an iterator is suspended on its key-mate", () => {
+    const set = new MapSet<string>([strA]);
+    const values = set.values();
+    expect(values.next()).toEqual({ value: strA, done: false });
+    set.add(strB);
+    expect(values.next()).toEqual({ value: strB, done: false });
+    expect(values.next().done).toBe(true);
   });
 });
 
@@ -150,6 +234,99 @@ describe("MapSet set algebra matches native Set on primitives", () => {
     }
   });
 
+  // The ES2025 algorithms, written over a native Set, whose iteration is the spec's live walk of
+  // [[SetData]]. Only the loops that call has() on this set's values are modelled.
+  const spec = {
+    intersection: (o: Set<unknown>, has: (v: unknown) => boolean) => {
+      const result: unknown[] = [];
+      for (const e of o) if (has(e) && !result.includes(e)) result.push(e);
+      return result;
+    },
+    difference: (o: Set<unknown>, has: (v: unknown) => boolean) => [...o].filter((e) => !has(e)),
+    isSubsetOf: (o: Set<unknown>, has: (v: unknown) => boolean) => {
+      for (const e of o) if (!has(e)) return false;
+      return true;
+    },
+    isDisjointFrom: (o: Set<unknown>, has: (v: unknown) => boolean) => {
+      for (const e of o) if (has(e)) return false;
+      return true;
+    },
+  };
+
+  it("follows the spec when other.has() changes this set", () => {
+    fc.assert(
+      fc.property(
+        fc.array(primitive, { minLength: 1 }),
+        fc.array(primitive),
+        fc.array(mutation, { maxLength: 20 }),
+        (left, right, ops) => {
+          const inOther = new Set(right);
+          for (const method of Object.keys(spec) as (keyof typeof spec)[]) {
+            const run = (set: MapSet<unknown> | Set<unknown>, apply: (has: (v: unknown) => boolean) => unknown) => {
+              const calls: unknown[] = [];
+              const pending = ops.slice();
+              const has = (value: unknown) => {
+                calls.push(value);
+                mutate(set, pending);
+                return inOther.has(value);
+              };
+              return { result: apply(has), calls };
+            };
+            // A size no smaller than this set's, so has() drives every one of these loops.
+            const mine = new MapSet<unknown>(left);
+            const actual = run(mine, (has) => {
+              const result = mine[method]({ size: Infinity, has, keys: () => [].values() });
+              return typeof result === "boolean" ? result : [...result];
+            });
+            const theirs = new Set<unknown>(left);
+            const expected = run(theirs, (has) => spec[method](theirs, has));
+            expect(actual, method).toEqual(expected);
+          }
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+
+  // GetIteratorFromMethod reads next before union and symmetricDifference copy this set.
+  it("reads the keys iterator's next once, before copying this set", () => {
+    for (const method of ["union", "symmetricDifference"] as const) {
+      const set = new MapSet([1]);
+      let reads = 0;
+      const other = {
+        size: 0,
+        has: () => false,
+        keys: () => ({
+          get next() {
+            reads++;
+            set.add(2);
+            return () => ({ done: true, value: undefined });
+          },
+        }),
+      };
+      expect([...set[method](other)], method).toEqual([1, 2]);
+      expect(reads, method).toBe(1);
+    }
+  });
+
+  it("closes the keys iterator when a predicate stops early", () => {
+    const log: string[] = [];
+    const other = {
+      size: 1,
+      has: () => true,
+      keys: () => ({
+        next: () => ({ done: false, value: 1 }),
+        return: () => {
+          log.push("return");
+          return { done: true as const, value: undefined };
+        },
+      }),
+    };
+    expect(new MapSet([1, 2]).isDisjointFrom(other)).toBe(false);
+    expect(new MapSet([3, 4]).isSupersetOf(other)).toBe(false);
+    expect(log).toEqual(["return", "return"]);
+  });
+
   it("accepts an infinite size", () => {
     const everything = { size: Infinity, has: () => true, keys: () => [].values() };
     expect(new MapSet([1]).isSubsetOf(everything)).toBe(true);
@@ -184,14 +361,106 @@ describe("MapSet set algebra with deep equality", () => {
     expect([...otherDrives][0]).toBe(b);
   });
 
-  it("defers to other.has() for membership, so a Set argument matches by reference", () => {
+  it("compares a Set argument's values by deep equality, whichever side is smaller", () => {
     const set = new MapSet([a, b, c]);
-    expect(set.intersection(new Set([{ id: 1 }, { id: 2 }, b, { id: 9 }])).size).toBe(1);
-    // When the argument is smaller, its values are looked up in this set, by deep equality.
-    expect(set.intersection(new Set([{ id: 1 }, { id: 2 }])).size).toBe(2);
+    // The Set is larger, so the spec would call Set.has with each value of this set.
+    const larger = new Set([{ id: 1 }, { id: 2 }, b, { id: 9 }]);
+    expect([...set.intersection(larger)]).toEqual([a, b]);
+    expect([...set.intersection(larger)][0]).toBe(a);
+    expect([...set.difference(larger)]).toEqual([c]);
+    expect(set.isSubsetOf(new Set([{ id: 3 }, { id: 2 }, { id: 1 }]))).toBe(true);
+    expect(set.isDisjointFrom(new Set([{ id: 3 }, { id: 7 }, { id: 8 }, { id: 9 }]))).toBe(false);
+    expect(set.isDisjointFrom(new Set([{ id: 6 }, { id: 7 }, { id: 8 }, { id: 9 }]))).toBe(true);
+    // The Set is smaller, so its values are looked up in this set.
+    expect([...set.intersection(new Set([{ id: 1 }, { id: 2 }]))]).toEqual([a, b]);
   });
 
-  it("keeps colliding values in separate result buckets", () => {
+  it("counts equal values in a Set argument once in isSupersetOf()", () => {
+    expect(new MapSet([a]).isSupersetOf(new Set([{ id: 1 }, { id: 1 }]))).toBe(true);
+    expect(new MapSet([a]).isSupersetOf(new Set([{ id: 1 }, { id: 2 }]))).toBe(false);
+  });
+
+  it("hashes a Set argument only when an object of this set misses it by reference", () => {
+    let reads = 0;
+    const watched = {
+      get id() {
+        reads++;
+        return 0;
+      },
+    };
+    const other = new Set<unknown>([a, b, 1, 2, watched]);
+    const set = new MapSet<unknown>([a, b, 1]);
+    set.intersection(other);
+    set.difference(other);
+    set.isSubsetOf(other);
+    set.isDisjointFrom(other);
+    // A primitive that misses is absent by deep equality too.
+    new MapSet<unknown>([1, 5]).intersection(other);
+    new MapSet<unknown>([1, 5, 9]).isDisjointFrom(new Set([4, 6, 7, 8, watched]));
+    expect(reads).toBe(0);
+    // Two objects miss, and the Set is hashed once for the call.
+    new MapSet<unknown>([a, c, { id: 4 }]).intersection(other);
+    expect(reads).toBe(1);
+  });
+
+  it("matches the deep-equality model for Set arguments", () => {
+    const atom = fc.oneof(
+      fc.integer({ min: 0, max: 5 }),
+      fc.constantFrom("x", NaN, -0, null),
+      fc.record({ k: fc.integer({ min: 0, max: 3 }) }),
+      fc.array(fc.integer({ min: 0, max: 2 }), { maxLength: 2 }),
+    );
+    const isIn = (values: unknown[], value: unknown) => values.some((v) => deepEqual(value, v));
+    fc.assert(
+      fc.property(
+        fc.array(atom, { maxLength: 8 }),
+        fc.array(atom, { maxLength: 8 }),
+        fc.array(fc.nat(), { maxLength: 3 }),
+        (left, right, shared) => {
+          const set = new MapSet<unknown>(left);
+          const mine = [...set];
+          // Fresh values, and some of this set's own values, so both lookups are exercised.
+          const theirs = [...right, ...shared.filter((i) => i < mine.length).map((i) => mine[i])];
+          const other = new Set(theirs);
+          const inOther = mine.filter((v) => isIn(theirs, v));
+          const outside = mine.filter((v) => !isIn(theirs, v));
+          const sameValues = (got: Iterable<unknown>, want: unknown[]) => {
+            const values = [...got];
+            expect(values.length).toBe(want.length);
+            for (const v of want) expect(values.some((x) => Object.is(x, v))).toBe(true);
+          };
+          sameValues(set.intersection(other), inOther);
+          sameValues(set.difference(other), outside);
+          expect(set.isSubsetOf(other)).toBe(outside.length === 0);
+          expect(set.isDisjointFrom(other)).toBe(inOther.length === 0);
+          expect(set.isSupersetOf(other)).toBe(theirs.every((v) => isIn(mine, v)));
+        },
+      ),
+      { numRuns: 1000 },
+    );
+  });
+
+  it("uses other.has() for a Map, a Set subclass, a Set with its own has() and another realm's Set", () => {
+    class SubSet extends Set<unknown> {}
+    const ownHas = new Set<unknown>([{ id: 1 }]);
+    ownHas.has = function (value) {
+      return Set.prototype.has.call(this, value);
+    };
+    const others: SetLike<unknown>[] = [
+      new Map([[{ id: 1 }, true]]),
+      new SubSet([{ id: 1 }]),
+      ownHas,
+      vm.runInNewContext("new Set([{ id: 1 }])"),
+    ];
+    for (const other of others) {
+      expect(new MapSet([a]).isSubsetOf(other)).toBe(false);
+      expect(new MapSet([a]).intersection(other).size).toBe(0);
+    }
+    // When the argument is smaller, its values are looked up in this set, by deep equality.
+    expect(new MapSet([a, b]).intersection(new Map([[{ id: 1 }, true]])).size).toBe(1);
+  });
+
+  it("keeps colliding values apart in results", () => {
     const set = new MapSet([strA, strB, "x"]);
     expect([...set.difference(new MapSet([strA]))]).toEqual([strB, "x"]);
     expect([...set.intersection(new MapSet([strB, "y", "z", "w"]))]).toEqual([strB]);

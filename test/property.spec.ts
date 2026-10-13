@@ -6,7 +6,7 @@ import { createRng } from "./competitors/workload";
 import { collidingObjects, collidingStrings, collidingWithUndefined } from "./fixtures/collisions";
 
 // Leaves cover the cases the hash special-cases, plus the collision fixtures so that random
-// collections regularly put two values in one bucket.
+// collections regularly give two values one key.
 const leaf = fc.oneof(
   fc.integer(),
   fc.double(),
@@ -159,7 +159,7 @@ describe("MapSet", () => {
   });
 
   it("matches a list model under interleaved add, has and delete", () => {
-    // A small pool, so operations often hit values already present or sharing a bucket.
+    // A small pool, so operations often hit values already present or sharing a key.
     const pool = fc.oneof(
       fc.constantFrom<unknown>(undefined, ...collidingStrings, ...collidingWithUndefined),
       fc.integer({ min: 0, max: 3 }),
@@ -186,9 +186,9 @@ describe("MapSet", () => {
           }
           expect(set.size).toBe(model.length);
         }
-        const members = [...set];
-        expect(members).toHaveLength(model.length);
-        for (const m of members) expect(model.some((y) => deepEqual(m, y))).toBe(true);
+        // Each stored value is the first equal one added, in insertion order, as in a native Set.
+        expect([...set]).toEqual(model);
+        [...set].forEach((m, i) => expect(m).toBe(model[i]));
       }),
       { numRuns: 500 },
     );
@@ -196,7 +196,7 @@ describe("MapSet", () => {
 });
 
 describe("MapSet set algebra", () => {
-  // A small pool, so the two sides often share values and buckets, plus arbitrary deep values.
+  // A small pool, so the two sides often share values and keys, plus arbitrary deep values.
   const pool = fc.oneof(
     fc.constantFrom<unknown>(undefined, ...collidingStrings, ...collidingWithUndefined),
     fc.integer({ min: 0, max: 3 }),
@@ -219,25 +219,27 @@ describe("MapSet set algebra", () => {
           const inA = (x: unknown) => aItems.some((y) => deepEqual(x, y));
           const inB = (x: unknown) => bItems.some((y) => deepEqual(x, y));
 
-          /** `set` holds exactly the `expected` values, each by identity. */
-          const expectMembers = (set: MapSet<unknown>, expected: unknown[]) => {
+          /** `set` holds exactly the `expected` values, each by identity, in that order unless `anyOrder`. */
+          const expectMembers = (set: MapSet<unknown>, expected: unknown[], anyOrder = false) => {
             const members = [...set];
             expect(members).toHaveLength(expected.length);
             expect(set.size).toBe(expected.length);
+            if (!anyOrder) members.forEach((m, i) => expect(Object.is(m, expected[i])).toBe(true));
             for (const x of expected) expect(members.some((m) => Object.is(m, x))).toBe(true);
           };
 
           const onlyA = aItems.filter((x) => !inB(x));
           const onlyB = bItems.filter((x) => !inA(x));
           expectMembers(a.union(b), [...aItems, ...onlyB]);
-          expectMembers(a.intersection(b), aItems.filter(inB));
+          // In b's order when b is the smaller side.
+          expectMembers(a.intersection(b), aItems.filter(inB), true);
           expectMembers(a.difference(b), onlyA);
           expectMembers(a.symmetricDifference(b), [...onlyA, ...onlyB]);
           expect(a.isSubsetOf(b)).toBe(onlyA.length === 0);
           expect(a.isSupersetOf(b)).toBe(onlyB.length === 0);
           expect(a.isDisjointFrom(b)).toBe(aItems.every((x) => !inB(x)));
 
-          // Results share no buckets with their inputs.
+          // Results share no boxes with their inputs.
           for (const result of [a.union(b), a.difference(b), a.symmetricDifference(b)]) {
             for (const x of [...result]) result.delete(x);
           }

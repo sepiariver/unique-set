@@ -92,32 +92,48 @@ const _circularEqual = createCustomEqual<undefined>({
 });
 
 const _tooDeep = new Error("unique-set: value nested past MAX_DEPTH");
+
+/** The depth limit of the hash in progress. Each `_hashRoot` call sets its own and restores its caller's. */
 let _limit = MAX_DEPTH;
 
 /**
- * Whether the last `_hashRoot` call hit `MAX_DEPTH`, so the value may be circular and must be
- * compared with `_circularEqual`. Any other value has a finite depth that ends a lockstep
- * `deepEqual`, even against a circular stored value.
+ * Whether the last `_hashRoot` call to return hit `MAX_DEPTH`, so the value may be circular and
+ * must be compared with `_circularEqual`. Any other value has a finite depth that ends a lockstep
+ * `deepEqual`, even against a circular stored value. Set only as `_hashRoot` returns, so a getter
+ * that hashes another value while this one is hashed cannot overwrite it, and read by the caller
+ * before any user code runs.
  */
 let _deep = false;
 
 /**
  * Hashes `value`, falling back to a hash cut off at `CUT_DEPTH` when it is nested past
- * `MAX_DEPTH`. Equal values unfold alike, so both always take the same path.
+ * `MAX_DEPTH`. Equal values unfold alike, so both always take the same path. Re-entrant: a
+ * getter reached while hashing may hash another value, or use a `MapSet`, with its own limit.
  */
 const _hashRoot = (value: unknown): number => {
-  _deep = false;
+  const outer = _limit;
+  _limit = MAX_DEPTH;
   try {
-    return _shash(value, 0x811c9dc5, 0);
+    const hash = _shash(value, 0x811c9dc5, 0);
+    _limit = outer;
+    _deep = false;
+    return hash;
   } catch (error) {
+    _limit = outer;
     if (error !== _tooDeep) throw error;
   }
-  _deep = true;
+  return _hashCut(value, outer);
+};
+
+/** `_hashRoot`'s second pass, for a value nested past `MAX_DEPTH`. */
+const _hashCut = (value: unknown, outer: number): number => {
   _limit = CUT_DEPTH;
   try {
-    return _shash(value, 0x811c9dc5, 0);
+    const hash = _shash(value, 0x811c9dc5, 0);
+    _deep = true;
+    return hash;
   } finally {
-    _limit = MAX_DEPTH;
+    _limit = outer;
   }
 };
 
@@ -138,9 +154,10 @@ const _mixBytes = (hash: number, bytes: Uint8Array): number => {
 };
 
 // Every case below hashes no more than fast-equals compares for that kind of value (often less),
-// so equal values always share a key. It follows fast-equals' own dispatch: an object whose
-// constructor is `Object`, or which has none, compares by its keys; a same-realm built-in by its
-// contents; and any other object by its `Object.prototype.toString` tag (see `_shashTagged`).
+// so equal values share a key, with the exception in README.md, "Equality semantics". It follows
+// fast-equals' own dispatch: an object whose constructor is `Object`, or which has none, compares
+// by its keys; a same-realm built-in by its contents; and any other object by its
+// `Object.prototype.toString` tag (see `_shashTagged`).
 
 const _toString = Object.prototype.toString;
 const _mapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size")!.get!;
@@ -312,17 +329,20 @@ const _shashTagged = (value: object, hash: number, depth: number): number => {
   }
 };
 
+/** `URL.prototype.href`'s getter, whose brand check tells a real URL from one that borrows the tag. */
+const _urlHref =
+  typeof URL === "function" ? Object.getOwnPropertyDescriptor(URL.prototype, "href")?.get : undefined;
+
 /**
  * Equal when `href` matches, or the components below match and the query holds the same
  * `&`-separated pairs in any order, so the pairs are summed rather than hashed in sequence.
+ * A real URL's `href` is the serialization of those components, so either rule implies the
+ * other. An object that only borrows the tag has no such link between the two, so the only
+ * hash both rules agree on is a fixed one.
  */
 const _shashUrl = (value: URL, hash: number, depth: number): number => {
-  let searchParams: string;
-  try {
-    searchParams = value.searchParams.toString();
-  } catch {
-    return _mix(hash, 0x1a); // only borrows the tag
-  }
+  if (!_urlHref || !_isBrand(_urlHref, value)) return _mix(hash, 0x1a);
+  const searchParams = value.searchParams.toString();
   hash = _shash(value.protocol, _mix(hash, 0x1a), depth);
   hash = _shash(value.username, hash, depth);
   hash = _shash(value.password, hash, depth);
@@ -392,20 +412,35 @@ const _shash = (value: unknown, hash: number, depth: number): number => {
 const _key = (value: unknown): number => _hashRoot(value) | 0;
 
 /**
- * Values whose keys collide. Module-private, so no stored value can be a `Bucket`,
- * which makes `instanceof Bucket` a safe discriminator. Always holds two or more items.
+ * What `_find` returns when no stored value matches, and what an emptied `Box` holds.
+ * Module-private, so never a stored value.
  */
-class Bucket<T> {
-  items: T[];
-  constructor(items: T[]) {
-    this.items = items;
+const _NONE: unique symbol = Symbol("none");
+
+/**
+ * A value whose key it shares with another. Module-private, so no stored value can be a `Box`,
+ * which makes `instanceof Box` a safe discriminator.
+ *
+ * Layout of a `MapSet`'s `Map`: a value whose key no other value has is the entry at that key
+ * itself. Once a second value arrives at the key, the first moves into a `Box` that stays the
+ * entry at the key and lists every box holding a value with that key. Each later value gets a
+ * `Box` entry of its own, keyed by the box. So every value is one `Map` entry in insertion
+ * order, and iterating the `Map` iterates the set as a native `Set` would, including values
+ * added or deleted during iteration. Deleting the first of several values empties its box
+ * rather than its entry, which keeps the others reachable from the key.
+ */
+class Box<T> {
+  value: T | typeof _NONE;
+  readonly key: number;
+  /** On the entry at `key`: the boxes at `key` that hold a value, in insertion order. */
+  group: Box<T>[] | undefined;
+  constructor(value: T, key: number) {
+    this.value = value;
+    this.key = key;
   }
 }
 
-type Slots<T> = Map<number, T | Bucket<T>>;
-
-/** What `_find` returns when no stored value matches. Module-private, so never a stored value. */
-const _NONE: unique symbol = Symbol("none");
+type Slots<T> = Map<number | Box<T>, T | Box<T>>;
 
 /** The stored value at `key` that equals `value`, or `_NONE`. */
 const _find = <T>(
@@ -415,9 +450,9 @@ const _find = <T>(
   equal: typeof _deepEqual
 ): T | typeof _NONE => {
   const slot = map.get(key);
-  if (slot instanceof Bucket) {
-    for (const item of slot.items) {
-      if (equal(value, item)) return item;
+  if (slot instanceof Box) {
+    for (const box of slot.group!) {
+      if (equal(value, box.value)) return box.value;
     }
     return _NONE;
   }
@@ -426,23 +461,42 @@ const _find = <T>(
   return equal(value, slot) ? slot : _NONE;
 };
 
-/** Stores `value` at `key`, which must not hold a value equal to it. */
+/** Stores `value` at `key`, which must not hold a value equal to it, after every stored value. */
 const _insert = <T>(map: Slots<T>, key: number, value: T): void => {
-  const slot = map.get(key);
-  if (slot === undefined && !map.has(key)) map.set(key, value);
-  else if (slot instanceof Bucket) slot.items.push(value);
-  else map.set(key, new Bucket([slot as T, value]));
+  let head = map.get(key);
+  if (head === undefined && !map.has(key)) {
+    map.set(key, value);
+    return;
+  }
+  if (!(head instanceof Box)) {
+    head = new Box(head as T, key);
+    head.group = [head];
+    map.set(key, head); // keeps the entry's place
+  }
+  const box = new Box(value, key);
+  head.group!.push(box);
+  map.set(box, box);
+};
+
+/** Removes the `i`th box of the group at `head`, leaving every other value's entry in place. */
+const _unbox = <T>(map: Slots<T>, head: Box<T>, i: number): void => {
+  const group = head.group!;
+  const box = group[i]!;
+  group.splice(i, 1);
+  box.value = _NONE;
+  if (box !== head) map.delete(box);
+  if (group.length === 0) map.delete(head.key);
+  else if (group[0] === head && group.length === 1) map.set(head.key, head.value as T);
 };
 
 /** Removes the stored value `item` itself from `key`, and reports whether it was there. */
 const _remove = <T>(map: Slots<T>, key: number, item: T): boolean => {
   const slot = map.get(key);
-  if (slot instanceof Bucket) {
-    const items = slot.items;
-    for (let i = 0; i < items.length; i++) {
-      if (Object.is(items[i], item)) {
-        items.splice(i, 1);
-        if (items.length === 1) map.set(key, items[0]!);
+  if (slot instanceof Box) {
+    const group = slot.group!;
+    for (let i = 0; i < group.length; i++) {
+      if (Object.is(group[i]!.value, item)) {
+        _unbox(map, slot, i);
         return true;
       }
     }
@@ -456,8 +510,19 @@ const _remove = <T>(map: Slots<T>, key: number, item: T): boolean => {
 /** Whether `key` holds the stored value `item` itself. */
 const _holds = <T>(map: Slots<T>, key: number, item: T): boolean => {
   const slot = map.get(key);
-  if (slot instanceof Bucket) return slot.items.some((stored) => Object.is(stored, item));
+  if (slot instanceof Box) return slot.group!.some((box) => Object.is(box.value, item));
   return Object.is(slot, item) && (slot !== undefined || map.has(key));
+};
+
+/**
+ * Calls `fn` with each stored value and its key, in insertion order. Live, like `Map.forEach`:
+ * values added during the walk are visited, and values deleted before they are reached are not.
+ */
+const _each = <T>(map: Slots<T>, fn: (item: T, key: number) => void): void => {
+  map.forEach((slot, key) => {
+    if (!(slot instanceof Box)) fn(slot, key as number);
+    else if (slot.value !== _NONE) fn(slot.value, slot.key);
+  });
 };
 
 /**
@@ -494,17 +559,46 @@ const _setRecord = <T>(other: SetLike<T>): SetRecord<T> => {
   return { set: other, size: intSize, has, keys };
 };
 
+const _setHas = Set.prototype.has;
+const _setKeys = Set.prototype.keys;
+const _setForEach = Set.prototype.forEach;
+
 /**
- * Calls the record's `keys()` now and iterates what it returns. `for…of` over the result reads
- * `next` once, and calls `return` when the loop exits early, as the spec does.
+ * Whether `rec` is a plain `Set`: a native `Set` of this realm whose prototype is `Set.prototype`
+ * and whose `has()` and `keys()` are the built-ins. Set algebra compares a plain `Set`'s values by
+ * deep equality (README.md, "Differences from native `Set`"). Checked after `_setRecord`, which
+ * reads the argument as the spec does, and without running any user code.
+ */
+const _isPlainSet = (rec: SetRecord<unknown>): boolean =>
+  rec.has === _setHas &&
+  rec.keys === _setKeys &&
+  _isBrand(_setSize, rec.set) &&
+  Object.getPrototypeOf(rec.set) === Set.prototype;
+
+/**
+ * The spec's GetIteratorFromMethod: calls the record's `keys()` and reads the iterator's `next`
+ * now, before the caller does anything else that user code could observe, such as copying this
+ * set. `for…of` over the result calls that `next` for each value, and the iterator's `return`
+ * when the loop exits early, as the spec does.
  */
 const _keysOf = <T>(rec: SetRecord<T>): Iterable<T> => {
   const iterator = rec.keys.call(rec.set);
-  return { [Symbol.iterator]: () => iterator };
+  if (iterator === null || (typeof iterator !== "object" && typeof iterator !== "function")) {
+    throw new TypeError("MapSet: the argument's keys() must return an object");
+  }
+  const next = iterator.next;
+  const steps: Iterator<T> = {
+    next: () => next.call(iterator),
+    return: () => {
+      const close = iterator.return;
+      return close == null ? { done: true, value: undefined } : close.call(iterator);
+    },
+  };
+  return { [Symbol.iterator]: () => steps };
 };
 
 export class MapSet<T> {
-  #map: Map<number, T | Bucket<T>>;
+  #map: Slots<T>;
   #size: number;
   // The stored value the last `add()` matched, while `#probing`, for the duplicate probe
   // (PERF.md, Notes).
@@ -527,18 +621,20 @@ export class MapSet<T> {
     if (this.#probing && _shallowEqual(value, this.#last)) return this;
     const key = _key(value);
     const equal = _deep ? _circularEqual : _deepEqual;
-    const slot = this.#map.get(key);
+    const map = this.#map;
+    const slot = map.get(key);
     // `get()` also returns `undefined` for a stored `undefined`, so confirm the miss.
-    if (slot === undefined && !this.#map.has(key)) {
-      this.#map.set(key, value);
-    } else if (slot instanceof Bucket) {
-      for (const item of slot.items) {
-        if (equal(value, item)) return this.#matched(item);
-      }
-      slot.items.push(value);
+    if (slot === undefined && !map.has(key)) {
+      map.set(key, value);
     } else {
-      if (equal(value, slot)) return this.#matched(slot as T);
-      this.#map.set(key, new Bucket([slot as T, value])); // `slot` may be a stored `undefined`
+      if (slot instanceof Box) {
+        for (const box of slot.group!) {
+          if (equal(value, box.value)) return this.#matched(box.value as T);
+        }
+      } else if (equal(value, slot)) {
+        return this.#matched(slot as T);
+      }
+      _insert(map, key, value);
     }
     this.#size++;
     this.#probing = false;
@@ -566,23 +662,23 @@ export class MapSet<T> {
     this.#probing = false;
     const key = _key(value);
     const equal = _deep ? _circularEqual : _deepEqual;
-    const slot = this.#map.get(key);
-    if (slot instanceof Bucket) {
-      const items = slot.items;
-      for (let i = 0; i < items.length; i++) {
-        if (equal(value, items[i])) {
-          items.splice(i, 1);
-          if (items.length === 1) this.#map.set(key, items[0]!);
+    const map = this.#map;
+    const slot = map.get(key);
+    if (slot instanceof Box) {
+      const group = slot.group!;
+      for (let i = 0; i < group.length; i++) {
+        if (equal(value, group[i]!.value)) {
+          _unbox(map, slot, i);
           this.#size--;
           return true;
         }
       }
       return false;
     }
-    if (slot === undefined ? value !== undefined || !this.#map.has(key) : !equal(value, slot)) {
+    if (slot === undefined ? value !== undefined || !map.has(key) : !equal(value, slot)) {
       return false;
     }
-    this.#map.delete(key);
+    map.delete(key);
     this.#size--;
     return true;
   }
@@ -604,23 +700,15 @@ export class MapSet<T> {
   ): void {
     if (typeof callback !== "function") throw new TypeError("MapSet: forEach requires a function");
     for (const slot of this.#map.values()) {
-      if (slot instanceof Bucket) {
-        for (const value of slot.items) {
-          callback.call(thisArg, value, value, this);
-        }
-      } else {
-        callback.call(thisArg, slot, slot, this);
-      }
+      if (!(slot instanceof Box)) callback.call(thisArg, slot, slot, this);
+      else if (slot.value !== _NONE) callback.call(thisArg, slot.value, slot.value, this);
     }
   }
 
   *values(): IterableIterator<T> {
     for (const slot of this.#map.values()) {
-      if (slot instanceof Bucket) {
-        yield* slot.items;
-      } else {
-        yield slot;
-      }
+      if (!(slot instanceof Box)) yield slot;
+      else if (slot.value !== _NONE) yield slot.value;
     }
   }
 
@@ -645,14 +733,43 @@ export class MapSet<T> {
   // Set algebra, following the ES2025 `Set` methods step for step: `other` is read through
   // `_setRecord`, the smaller side drives the loop where the spec says so, and every result is a
   // new `MapSet`. Values from this set keep their map key, so they are never hashed again.
-  // `other.has()` brings its own equality (README.md, "Differences from native `Set`").
+  // `other.has()` brings its own equality (README.md, "Differences from native `Set`"), and may
+  // change this set while a loop runs over it, so each loop reads the data the spec reads: this
+  // set live where the spec does, and the result's copy of it in `difference()`. A plain `Set`
+  // (`_isPlainSet`) is the exception: its `has()` compares by reference, so its values are
+  // compared by deep equality instead, through `#inPlainSet()` or this set's own lookups.
 
-  /** A copy sharing no buckets with this set, so either can change without affecting the other. */
+  /**
+   * Deep membership in the plain `Set` `other`, for values of this set. A reference hit settles
+   * it without hashing. The first object that misses hashes each object in `other`, once per
+   * call, to find every value of this set that one of them equals.
+   */
+  #inPlainSet(other: Set<unknown>): (item: unknown) => boolean {
+    let found: Set<unknown> | undefined;
+    return (item) => {
+      if (_setHas.call(other, item)) return true;
+      // Primitives and functions are deep-equal only when `has()` already matches them.
+      if (item === null || typeof item !== "object") return false;
+      if (found === undefined) {
+        found = new Set();
+        _setForEach.call(other, (value) => {
+          if (value === null || typeof value !== "object") return;
+          const match = this.#find(value);
+          if (match !== _NONE) found!.add(match);
+        });
+      }
+      return found.has(item);
+    };
+  }
+
+  /** A copy sharing no boxes with this set, so either can change without affecting the other. */
   #copy(): MapSet<T> {
     const copy = new MapSet<T>();
     const map = copy.#map;
     this.#map.forEach((slot, key) => {
-      map.set(key, slot instanceof Bucket ? new Bucket(slot.items.slice()) : slot);
+      // A lone value's key holds no other value of this set, so it holds none in the copy either.
+      if (!(slot instanceof Box)) map.set(key, slot);
+      else if (slot.value !== _NONE) _insert(map, slot.key, slot.value);
     });
     copy.#size = this.#size;
     return copy;
@@ -673,15 +790,12 @@ export class MapSet<T> {
     const result = new MapSet<T>();
     const map = result.#map;
     if (this.#size <= rec.size) {
-      this.#map.forEach((slot, key) => {
-        const items = slot instanceof Bucket ? slot.items : [slot as T];
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i]!;
-          // `has()` may change this set, which can visit a value twice.
-          if (rec.has.call(rec.set, item) && !_holds(map, key, item)) {
-            _insert(map, key, item);
-            result.#size++;
-          }
+      const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set as Set<unknown>) : undefined;
+      _each(this.#map, (item, key) => {
+        // `has()` may delete and re-add a value of this set, which visits it twice.
+        if ((inSet ? inSet(item) : rec.has.call(rec.set, item)) && !_holds(map, key, item)) {
+          _insert(map, key, item);
+          result.#size++;
         }
       });
     } else {
@@ -705,11 +819,11 @@ export class MapSet<T> {
     const result = this.#copy();
     const map = result.#map;
     if (this.#size <= rec.size) {
-      this.#map.forEach((slot, key) => {
-        const items = slot instanceof Bucket ? slot.items : [slot as T];
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i]!;
-          if (rec.has.call(rec.set, item) && _remove(map, key, item)) result.#size--;
+      // Over the copy, which `has()` cannot reach, so it visits each value this set had once.
+      const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set as Set<unknown>) : undefined;
+      _each(map, (item, key) => {
+        if ((inSet ? inSet(item) : rec.has.call(rec.set, item)) && _remove(map, key, item)) {
+          result.#size--;
         }
       });
     } else {
@@ -752,8 +866,9 @@ export class MapSet<T> {
   isSubsetOf(other: SetLike<unknown>): boolean {
     const rec = _setRecord(other);
     if (this.#size > rec.size) return false;
+    const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set as Set<unknown>) : undefined;
     for (const item of this.values()) {
-      if (!rec.has.call(rec.set, item)) return false;
+      if (!(inSet ? inSet(item) : rec.has.call(rec.set, item))) return false;
     }
     return true;
   }
@@ -761,7 +876,9 @@ export class MapSet<T> {
   /** Whether this set has every value of `other`. */
   isSupersetOf(other: SetLike<unknown>): boolean {
     const rec = _setRecord(other);
-    if (this.#size < rec.size) return false;
+    // A plain `Set` can hold several equal values, so it can be larger than this set and still
+    // hold only values of it.
+    if (this.#size < rec.size && !_isPlainSet(rec)) return false;
     for (const value of _keysOf(rec)) {
       if (this.#find(value) === _NONE) return false;
     }
@@ -771,11 +888,17 @@ export class MapSet<T> {
   /** Whether this set and `other` have no value in common. */
   isDisjointFrom(other: SetLike<unknown>): boolean {
     const rec = _setRecord(other);
-    if (this.#size <= rec.size) {
+    // `Set.has` compares by reference, so with a plain `Set` a miss settles primitives and
+    // functions alone, and any object of this set that misses calls for a pass over `other`.
+    let deep = this.#size > rec.size;
+    if (!deep) {
+      const plain = _isPlainSet(rec);
       for (const item of this.values()) {
         if (rec.has.call(rec.set, item)) return false;
+        if (plain && item !== null && typeof item === "object") deep = true;
       }
-    } else {
+    }
+    if (deep) {
       for (const value of _keysOf(rec)) {
         if (this.#find(value) !== _NONE) return false;
       }

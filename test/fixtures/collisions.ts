@@ -1,6 +1,6 @@
-// Values whose structural hashes collide, so tests can reach MapSet's multi-value bucket paths.
+// Values whose structural hashes collide, so tests can reach MapSet's paths for values that share a key.
 // They depend on the current hash; extra.spec.ts asserts that they still collide, so a hash change
-// fails there by name rather than leaving the bucket tests silently testing nothing.
+// fails there by name rather than leaving the collision tests silently testing nothing.
 //
 // The pairs were found by brute force: hash (i * 2654435761 >>> 0).toString(36), alone or as
 // { s: ... }, for increasing i until a hash repeats. The undefined family was found meet-in-the-middle:

@@ -57,18 +57,27 @@ var _tooDeep = new Error("unique-set: value nested past MAX_DEPTH");
 var _limit = MAX_DEPTH;
 var _deep = false;
 var _hashRoot = (value) => {
-  _deep = false;
+  const outer = _limit;
+  _limit = MAX_DEPTH;
   try {
-    return _shash(value, 2166136261, 0);
+    const hash = _shash(value, 2166136261, 0);
+    _limit = outer;
+    _deep = false;
+    return hash;
   } catch (error) {
+    _limit = outer;
     if (error !== _tooDeep) throw error;
   }
-  _deep = true;
+  return _hashCut(value, outer);
+};
+var _hashCut = (value, outer) => {
   _limit = CUT_DEPTH;
   try {
-    return _shash(value, 2166136261, 0);
+    const hash = _shash(value, 2166136261, 0);
+    _deep = true;
+    return hash;
   } finally {
-    _limit = MAX_DEPTH;
+    _limit = outer;
   }
 };
 var _mix = (hash, byte) => {
@@ -212,13 +221,10 @@ var _shashTagged = (value, hash, depth) => {
       return _shashIdentity(value, hash);
   }
 };
+var _urlHref = typeof URL === "function" ? Object.getOwnPropertyDescriptor(URL.prototype, "href")?.get : void 0;
 var _shashUrl = (value, hash, depth) => {
-  let searchParams;
-  try {
-    searchParams = value.searchParams.toString();
-  } catch {
-    return _mix(hash, 26);
-  }
+  if (!_urlHref || !_isBrand(_urlHref, value)) return _mix(hash, 26);
+  const searchParams = value.searchParams.toString();
   hash = _shash(value.protocol, _mix(hash, 26), depth);
   hash = _shash(value.username, hash, depth);
   hash = _shash(value.password, hash, depth);
@@ -276,18 +282,22 @@ var _shash = (value, hash, depth) => {
   return _shashTagged(value, hash, depth);
 };
 var _key = (value) => _hashRoot(value) | 0;
-var Bucket = class {
-  items;
-  constructor(items) {
-    this.items = items;
+var _NONE = /* @__PURE__ */ Symbol("none");
+var Box = class {
+  value;
+  key;
+  /** On the entry at `key`: the boxes at `key` that hold a value, in insertion order. */
+  group;
+  constructor(value, key) {
+    this.value = value;
+    this.key = key;
   }
 };
-var _NONE = /* @__PURE__ */ Symbol("none");
 var _find = (map, key, value, equal) => {
   const slot = map.get(key);
-  if (slot instanceof Bucket) {
-    for (const item of slot.items) {
-      if (equal(value, item)) return item;
+  if (slot instanceof Box) {
+    for (const box of slot.group) {
+      if (equal(value, box.value)) return box.value;
     }
     return _NONE;
   }
@@ -295,19 +305,36 @@ var _find = (map, key, value, equal) => {
   return equal(value, slot) ? slot : _NONE;
 };
 var _insert = (map, key, value) => {
-  const slot = map.get(key);
-  if (slot === void 0 && !map.has(key)) map.set(key, value);
-  else if (slot instanceof Bucket) slot.items.push(value);
-  else map.set(key, new Bucket([slot, value]));
+  let head = map.get(key);
+  if (head === void 0 && !map.has(key)) {
+    map.set(key, value);
+    return;
+  }
+  if (!(head instanceof Box)) {
+    head = new Box(head, key);
+    head.group = [head];
+    map.set(key, head);
+  }
+  const box = new Box(value, key);
+  head.group.push(box);
+  map.set(box, box);
+};
+var _unbox = (map, head, i) => {
+  const group = head.group;
+  const box = group[i];
+  group.splice(i, 1);
+  box.value = _NONE;
+  if (box !== head) map.delete(box);
+  if (group.length === 0) map.delete(head.key);
+  else if (group[0] === head && group.length === 1) map.set(head.key, head.value);
 };
 var _remove = (map, key, item) => {
   const slot = map.get(key);
-  if (slot instanceof Bucket) {
-    const items = slot.items;
-    for (let i = 0; i < items.length; i++) {
-      if (Object.is(items[i], item)) {
-        items.splice(i, 1);
-        if (items.length === 1) map.set(key, items[0]);
+  if (slot instanceof Box) {
+    const group = slot.group;
+    for (let i = 0; i < group.length; i++) {
+      if (Object.is(group[i].value, item)) {
+        _unbox(map, slot, i);
         return true;
       }
     }
@@ -319,8 +346,14 @@ var _remove = (map, key, item) => {
 };
 var _holds = (map, key, item) => {
   const slot = map.get(key);
-  if (slot instanceof Bucket) return slot.items.some((stored) => Object.is(stored, item));
+  if (slot instanceof Box) return slot.group.some((box) => Object.is(box.value, item));
   return Object.is(slot, item) && (slot !== void 0 || map.has(key));
+};
+var _each = (map, fn) => {
+  map.forEach((slot, key) => {
+    if (!(slot instanceof Box)) fn(slot, key);
+    else if (slot.value !== _NONE) fn(slot.value, slot.key);
+  });
 };
 var _setRecord = (other) => {
   if (other === null || typeof other !== "object" && typeof other !== "function") {
@@ -336,9 +369,24 @@ var _setRecord = (other) => {
   if (typeof keys !== "function") throw new TypeError("MapSet: the argument's keys must be a function");
   return { set: other, size: intSize, has, keys };
 };
+var _setHas = Set.prototype.has;
+var _setKeys = Set.prototype.keys;
+var _setForEach = Set.prototype.forEach;
+var _isPlainSet = (rec) => rec.has === _setHas && rec.keys === _setKeys && _isBrand(_setSize, rec.set) && Object.getPrototypeOf(rec.set) === Set.prototype;
 var _keysOf = (rec) => {
   const iterator = rec.keys.call(rec.set);
-  return { [Symbol.iterator]: () => iterator };
+  if (iterator === null || typeof iterator !== "object" && typeof iterator !== "function") {
+    throw new TypeError("MapSet: the argument's keys() must return an object");
+  }
+  const next = iterator.next;
+  const steps = {
+    next: () => next.call(iterator),
+    return: () => {
+      const close = iterator.return;
+      return close == null ? { done: true, value: void 0 } : close.call(iterator);
+    }
+  };
+  return { [Symbol.iterator]: () => steps };
 };
 var MapSet = class _MapSet {
   #map;
@@ -362,17 +410,19 @@ var MapSet = class _MapSet {
     if (this.#probing && _shallowEqual(value, this.#last)) return this;
     const key = _key(value);
     const equal = _deep ? _circularEqual : _deepEqual;
-    const slot = this.#map.get(key);
-    if (slot === void 0 && !this.#map.has(key)) {
-      this.#map.set(key, value);
-    } else if (slot instanceof Bucket) {
-      for (const item of slot.items) {
-        if (equal(value, item)) return this.#matched(item);
-      }
-      slot.items.push(value);
+    const map = this.#map;
+    const slot = map.get(key);
+    if (slot === void 0 && !map.has(key)) {
+      map.set(key, value);
     } else {
-      if (equal(value, slot)) return this.#matched(slot);
-      this.#map.set(key, new Bucket([slot, value]));
+      if (slot instanceof Box) {
+        for (const box of slot.group) {
+          if (equal(value, box.value)) return this.#matched(box.value);
+        }
+      } else if (equal(value, slot)) {
+        return this.#matched(slot);
+      }
+      _insert(map, key, value);
     }
     this.#size++;
     this.#probing = false;
@@ -396,23 +446,23 @@ var MapSet = class _MapSet {
     this.#probing = false;
     const key = _key(value);
     const equal = _deep ? _circularEqual : _deepEqual;
-    const slot = this.#map.get(key);
-    if (slot instanceof Bucket) {
-      const items = slot.items;
-      for (let i = 0; i < items.length; i++) {
-        if (equal(value, items[i])) {
-          items.splice(i, 1);
-          if (items.length === 1) this.#map.set(key, items[0]);
+    const map = this.#map;
+    const slot = map.get(key);
+    if (slot instanceof Box) {
+      const group = slot.group;
+      for (let i = 0; i < group.length; i++) {
+        if (equal(value, group[i].value)) {
+          _unbox(map, slot, i);
           this.#size--;
           return true;
         }
       }
       return false;
     }
-    if (slot === void 0 ? value !== void 0 || !this.#map.has(key) : !equal(value, slot)) {
+    if (slot === void 0 ? value !== void 0 || !map.has(key) : !equal(value, slot)) {
       return false;
     }
-    this.#map.delete(key);
+    map.delete(key);
     this.#size--;
     return true;
   }
@@ -428,22 +478,14 @@ var MapSet = class _MapSet {
   forEach(callback, thisArg) {
     if (typeof callback !== "function") throw new TypeError("MapSet: forEach requires a function");
     for (const slot of this.#map.values()) {
-      if (slot instanceof Bucket) {
-        for (const value of slot.items) {
-          callback.call(thisArg, value, value, this);
-        }
-      } else {
-        callback.call(thisArg, slot, slot, this);
-      }
+      if (!(slot instanceof Box)) callback.call(thisArg, slot, slot, this);
+      else if (slot.value !== _NONE) callback.call(thisArg, slot.value, slot.value, this);
     }
   }
   *values() {
     for (const slot of this.#map.values()) {
-      if (slot instanceof Bucket) {
-        yield* slot.items;
-      } else {
-        yield slot;
-      }
+      if (!(slot instanceof Box)) yield slot;
+      else if (slot.value !== _NONE) yield slot.value;
     }
   }
   /** The same as `values()`, as on `Set`. */
@@ -463,13 +505,39 @@ var MapSet = class _MapSet {
   // Set algebra, following the ES2025 `Set` methods step for step: `other` is read through
   // `_setRecord`, the smaller side drives the loop where the spec says so, and every result is a
   // new `MapSet`. Values from this set keep their map key, so they are never hashed again.
-  // `other.has()` brings its own equality (README.md, "Differences from native `Set`").
-  /** A copy sharing no buckets with this set, so either can change without affecting the other. */
+  // `other.has()` brings its own equality (README.md, "Differences from native `Set`"), and may
+  // change this set while a loop runs over it, so each loop reads the data the spec reads: this
+  // set live where the spec does, and the result's copy of it in `difference()`. A plain `Set`
+  // (`_isPlainSet`) is the exception: its `has()` compares by reference, so its values are
+  // compared by deep equality instead, through `#inPlainSet()` or this set's own lookups.
+  /**
+   * Deep membership in the plain `Set` `other`, for values of this set. A reference hit settles
+   * it without hashing. The first object that misses hashes each object in `other`, once per
+   * call, to find every value of this set that one of them equals.
+   */
+  #inPlainSet(other) {
+    let found;
+    return (item) => {
+      if (_setHas.call(other, item)) return true;
+      if (item === null || typeof item !== "object") return false;
+      if (found === void 0) {
+        found = /* @__PURE__ */ new Set();
+        _setForEach.call(other, (value) => {
+          if (value === null || typeof value !== "object") return;
+          const match = this.#find(value);
+          if (match !== _NONE) found.add(match);
+        });
+      }
+      return found.has(item);
+    };
+  }
+  /** A copy sharing no boxes with this set, so either can change without affecting the other. */
   #copy() {
     const copy = new _MapSet();
     const map = copy.#map;
     this.#map.forEach((slot, key) => {
-      map.set(key, slot instanceof Bucket ? new Bucket(slot.items.slice()) : slot);
+      if (!(slot instanceof Box)) map.set(key, slot);
+      else if (slot.value !== _NONE) _insert(map, slot.key, slot.value);
     });
     copy.#size = this.#size;
     return copy;
@@ -488,14 +556,11 @@ var MapSet = class _MapSet {
     const result = new _MapSet();
     const map = result.#map;
     if (this.#size <= rec.size) {
-      this.#map.forEach((slot, key) => {
-        const items = slot instanceof Bucket ? slot.items : [slot];
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          if (rec.has.call(rec.set, item) && !_holds(map, key, item)) {
-            _insert(map, key, item);
-            result.#size++;
-          }
+      const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set) : void 0;
+      _each(this.#map, (item, key) => {
+        if ((inSet ? inSet(item) : rec.has.call(rec.set, item)) && !_holds(map, key, item)) {
+          _insert(map, key, item);
+          result.#size++;
         }
       });
     } else {
@@ -516,11 +581,10 @@ var MapSet = class _MapSet {
     const result = this.#copy();
     const map = result.#map;
     if (this.#size <= rec.size) {
-      this.#map.forEach((slot, key) => {
-        const items = slot instanceof Bucket ? slot.items : [slot];
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          if (rec.has.call(rec.set, item) && _remove(map, key, item)) result.#size--;
+      const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set) : void 0;
+      _each(map, (item, key) => {
+        if ((inSet ? inSet(item) : rec.has.call(rec.set, item)) && _remove(map, key, item)) {
+          result.#size--;
         }
       });
     } else {
@@ -561,15 +625,16 @@ var MapSet = class _MapSet {
   isSubsetOf(other) {
     const rec = _setRecord(other);
     if (this.#size > rec.size) return false;
+    const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set) : void 0;
     for (const item of this.values()) {
-      if (!rec.has.call(rec.set, item)) return false;
+      if (!(inSet ? inSet(item) : rec.has.call(rec.set, item))) return false;
     }
     return true;
   }
   /** Whether this set has every value of `other`. */
   isSupersetOf(other) {
     const rec = _setRecord(other);
-    if (this.#size < rec.size) return false;
+    if (this.#size < rec.size && !_isPlainSet(rec)) return false;
     for (const value of _keysOf(rec)) {
       if (this.#find(value) === _NONE) return false;
     }
@@ -578,11 +643,15 @@ var MapSet = class _MapSet {
   /** Whether this set and `other` have no value in common. */
   isDisjointFrom(other) {
     const rec = _setRecord(other);
-    if (this.#size <= rec.size) {
+    let deep = this.#size > rec.size;
+    if (!deep) {
+      const plain = _isPlainSet(rec);
       for (const item of this.values()) {
         if (rec.has.call(rec.set, item)) return false;
+        if (plain && item !== null && typeof item === "object") deep = true;
       }
-    } else {
+    }
+    if (deep) {
       for (const value of _keysOf(rec)) {
         if (this.#find(value) !== _NONE) return false;
       }
