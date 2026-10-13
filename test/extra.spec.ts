@@ -1,4 +1,6 @@
 import { MapSet, structuralHash } from "../dist/index.mjs";
+import { deepEqual } from "fast-equals";
+import vm from "node:vm";
 import { describe, it, expect } from "vitest";
 import {
   collidingObjects,
@@ -178,7 +180,7 @@ describe("structuralHash for built-ins", () => {
     class CodedError extends Error {}
     expect(structuralHash(new CodedError("m"))).not.toBe(structuralHash(new CodedError("n")));
 
-    // Enumerable own properties take the plain-object path, so they alone are hashed.
+    // Enumerable own properties are compared too, so they are hashed alongside the message.
     class HttpError extends Error {
       constructor(public status: number) {
         super("http");
@@ -228,8 +230,8 @@ describe("structuralHash for built-ins", () => {
       new Boolean(false),
       new String(""),
     ]);
-    // A non-empty String wrapper has index keys, so it hashes as a plain object by its characters.
-    expect(new MapSet(range(100).map((i) => new String(`s${i}`))).size).toBe(100);
+    // A non-empty String wrapper has enumerable index keys, which fast-equals ignores.
+    expectDistinctKeys(range(100).map((i) => new String(`s${i}`)));
     // Object.is keeps 0 and -0 apart; sharing a key is coarser, so both are still stored.
     expect(structuralHash(new Number(-0))).toBe(structuralHash(new Number(0)));
     expect(new MapSet([new Number(0), new Number(-0)]).size).toBe(2);
@@ -251,6 +253,120 @@ describe("structuralHash for built-ins", () => {
     expect(new MapSet([preact(1), preact(2)]).size).toBe(1);
     // Without $$typeof, the same keys are ordinary data.
     expect(new MapSet([{ _owner: 1 }, { _owner: 2 }]).size).toBe(2);
+  });
+});
+
+/** MapSet keeps one value per class of values that fast-equals calls equal. */
+function expectFastEqualsClasses(values: unknown[]): void {
+  const kept: unknown[] = [];
+  for (const value of values) if (!kept.some((other) => deepEqual(value, other))) kept.push(value);
+  expect(new MapSet(values).size).toBe(kept.length);
+}
+
+const realm = vm.createContext({});
+const fromRealm = <T>(source: string): ((i: number) => T) => vm.runInContext(source, realm);
+
+describe("objects compared by their toString tag", () => {
+  it("ignores enumerable own keys where fast-equals does", () => {
+    const tagged = <T extends object>(value: T) => Object.assign(value, { tag: 1 });
+    const pairs: [unknown, unknown][] = [
+      [tagged(new String("ab")), new String("ab")],
+      [tagged(new Number(1)), new Number(1)],
+      [tagged(new URL("https://a.test/")), new URL("https://a.test/")],
+      [tagged(new ArrayBuffer(2)), new ArrayBuffer(2)],
+    ];
+    for (const [a, b] of pairs) {
+      expect(deepEqual(a, b)).toBe(true);
+      expect(new MapSet([a, b]).size).toBe(1);
+    }
+  });
+
+  it("hashes built-ins from another realm by their contents", () => {
+    const makers = [
+      fromRealm<unknown>("(i) => new Map([['k', i]])"),
+      fromRealm<unknown>("(i) => new Set([i, 'x'])"),
+      fromRealm<unknown>("(i) => new Date(i * 1000)"),
+      fromRealm<unknown>("(i) => new RegExp('r' + i, 'g')"),
+      fromRealm<unknown>("(i) => new Error('e' + i)"),
+      fromRealm<unknown>("(i) => new Uint8Array([i, i >> 8]).buffer"),
+      fromRealm<unknown>("(i) => new DataView(new Uint8Array([i, i >> 8]).buffer)"),
+      fromRealm<unknown>("(i) => new Number(i)"),
+    ];
+    for (const make of makers) {
+      expectDistinctKeys(range(200).map(make));
+      expectFastEqualsClasses(range(100).map((i) => make(i % 10)));
+    }
+    // fast-equals ignores enumerable own keys on these too.
+    const tagged = fromRealm<unknown>("(i) => Object.assign(new Map([['k', 1]]), i ? { tag: i } : {})");
+    expect(new MapSet([tagged(0), tagged(1)]).size).toBe(1);
+  });
+
+  it("gives each object that fast-equals compares by reference its own key", () => {
+    class Thenable {
+      then(): void {}
+    }
+    const makers: ((i: number) => object)[] = [
+      (i) => new URLSearchParams(`q=${i}`),
+      (i) => new Blob([String(i)]),
+      () => new WeakMap(),
+      () => Promise.resolve(1),
+      () => new Thenable(),
+    ];
+    for (const make of makers) {
+      const values = range(300).map(make);
+      expectDistinctKeys(values);
+      const set = new MapSet(values);
+      expect(values.every((value) => set.has(value))).toBe(true);
+      expect(set.has(make(0))).toBe(false);
+    }
+  });
+
+  it("agrees with fast-equals on objects that only borrow a built-in's tag", () => {
+    const lookAlike = (tag: string, extra: object = {}) =>
+      Object.assign(new (class {
+        get [Symbol.toStringTag]() {
+          return tag;
+        }
+      })(), extra);
+    const values = ["Map", "Set", "Date", "RegExp", "URL", "Number", "DataView", "Uint8Array", "Array"].flatMap(
+      (tag) => [lookAlike(tag), lookAlike(tag), lookAlike(tag, { source: "a", flags: "" })],
+    );
+    expectFastEqualsClasses(values);
+  });
+});
+
+describe("out-of-bounds and detached DataViews", () => {
+  // A view on a resizable buffer that then shrinks below it, which makes its getters throw.
+  const outOfBounds = (offset: number) => {
+    const buffer = new (ArrayBuffer as unknown as new (n: number, o: object) => ArrayBuffer & {
+      resize(n: number): void;
+    })(16, { maxByteLength: 64 });
+    const view = new DataView(buffer, offset);
+    buffer.resize(0);
+    return view;
+  };
+  const detached = () => {
+    const buffer = new ArrayBuffer(4);
+    const view = new DataView(buffer);
+    structuredClone(buffer, { transfer: [buffer] });
+    return view;
+  };
+
+  it("reads them as the empty view at offset 0, as out-of-bounds typed arrays report", () => {
+    expect(() => outOfBounds(8).byteOffset).toThrow(TypeError);
+    const set = new MapSet<unknown>([outOfBounds(8), outOfBounds(4), detached()]);
+    expect(set.size).toBe(1);
+    expect(set.has(new DataView(new ArrayBuffer(0)))).toBe(true);
+    expect(set.has(new DataView(new ArrayBuffer(4), 4))).toBe(false); // empty, but at offset 4
+    expect(set.has(new DataView(new ArrayBuffer(1)))).toBe(false);
+    expect(new MapSet([{ view: outOfBounds(8) }, { view: detached() }]).size).toBe(1);
+    expect(set.delete(detached())).toBe(true);
+    expect(set.size).toBe(0);
+  });
+
+  it("does not throw in the duplicate probe", () => {
+    // The second add() matches the first, so the third is checked with shallowEqual first.
+    expect(new MapSet([outOfBounds(8), outOfBounds(8), outOfBounds(8), new DataView(new ArrayBuffer(2))]).size).toBe(2);
   });
 });
 

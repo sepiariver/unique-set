@@ -1,14 +1,10 @@
-import {
-  createCustomEqual,
-  deepEqual,
-  shallowEqual,
-  type EqualityComparator,
-  type State,
-} from "fast-equals";
+import { createCustomEqual, type EqualityComparator, type State } from "fast-equals";
 
 /**
  * Streaming structural hash — computes a 32-bit FNV-1a hash by traversing
- * the value directly, without allocating an intermediate string.
+ * the value directly, without allocating an intermediate string. Objects that fast-equals
+ * compares by reference hash by identity, so their hash holds only within one process (see
+ * "Objects compared by reference" in the README's Considerations).
  */
 const _f64 = new Float64Array(1);
 const _u8 = new Uint8Array(_f64.buffer);
@@ -55,10 +51,42 @@ const _pairing =
     return result;
   };
 
+/**
+ * The bytes a `DataView` covers. A view whose buffer has shrunk below it, or been detached,
+ * throws on `byteOffset` and `byteLength`, so it reads as the empty view at offset 0, which is
+ * what an out-of-bounds typed array reports itself as.
+ */
+const _viewBytes = (view: DataView): Uint8Array => {
+  try {
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  } catch {
+    return new Uint8Array(0);
+  }
+};
+
+/** fast-equals' `DataView` comparison (bytes and `byteOffset`), through `_viewBytes`. */
+const _areDataViewsEqual = (a: DataView, b: DataView): boolean => {
+  const x = _viewBytes(a);
+  const y = _viewBytes(b);
+  if (x.length !== y.length || x.byteOffset !== y.byteOffset) return false;
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+};
+
+/** fast-equals' `deepEqual` and `shallowEqual`, except that no `DataView` makes them throw. */
+const _deepEqual = createCustomEqual<undefined>({
+  createCustomConfig: () => ({ areDataViewsEqual: _areDataViewsEqual }),
+});
+const _shallowEqual = createCustomEqual<undefined>({
+  createInternalComparator: () => Object.is,
+  createCustomConfig: () => ({ areDataViewsEqual: _areDataViewsEqual }),
+});
+
 /** `circularDeepEqual`, with the cycle check above on every comparator that recurses. */
 const _circularEqual = createCustomEqual<undefined>({
   createState: () => ({ cache: new WeakMap(), meta: undefined }),
   createCustomConfig: (config) => ({
+    areDataViewsEqual: _areDataViewsEqual,
     areArraysEqual: _pairing(config.areArraysEqual),
     areErrorsEqual: _pairing(config.areErrorsEqual),
     areMapsEqual: _pairing(config.areMapsEqual),
@@ -113,15 +141,98 @@ const _mixBytes = (hash: number, bytes: Uint8Array): number => {
   return hash;
 };
 
-// The built-in cases below each hash no more than fast-equals compares for that type (often
-// less), so equal values always share a key.
+// Every case below hashes no more than fast-equals compares for that kind of value (often less),
+// so equal values always share a key. It follows fast-equals' own dispatch: an object whose
+// constructor is `Object`, or which has none, compares by its keys; a same-realm built-in by its
+// contents; and any other object by its `Object.prototype.toString` tag (see `_shashTagged`).
+
+const _toString = Object.prototype.toString;
+const _mapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size")!.get!;
+const _setSize = Object.getOwnPropertyDescriptor(Set.prototype, "size")!.get!;
+const _getTime = Date.prototype.getTime;
+/** The element type of any typed array, from any realm, and `undefined` for a `DataView`. */
+const _typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Int8Array.prototype),
+  Symbol.toStringTag
+)!.get!;
+
+/** Whether `value` passes a built-in method's own brand check, which works across realms. */
+const _isBrand = (method: (this: never) => unknown, value: object): boolean => {
+  try {
+    method.call(value as never);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Ids for objects that fast-equals compares by reference, so that each gets its own key. */
+const _ids = new WeakMap<object, number>();
+let _nextId = 0;
+
+/** Hashes an object by its identity. Ids differ, so no two objects mixed at one point collide. */
+const _shashIdentity = (value: object, hash: number): number => {
+  let id = _ids.get(value);
+  if (id === undefined) _ids.set(value, (id = _nextId++));
+  return _mix(_mix(hash, 0x1c), id);
+};
+
+/** By own enumerable keys, in any order, as fast-equals compares plain objects. */
+const _shashKeys = (value: object, hash: number, depth: number): number => {
+  const keys = Object.keys(value);
+  hash = _mix(hash, 0x13);
+  let objHash = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]!;
+    // fast-equals skips these keys on React and Preact elements, so hashing them would be finer than equality.
+    if (
+      key.charCodeAt(0) === 95 && // "_"
+      (key === "_owner" || key === "__o" || key === "__v") &&
+      (value as { $$typeof?: unknown }).$$typeof
+    ) {
+      continue;
+    }
+    let pairHash = _mixStr(0x811c9dc5, key);
+    pairHash = _shash((value as Record<string, unknown>)[key], pairHash, depth);
+    objHash = (objHash + pairHash) | 0;
+  }
+  return _mix(hash, objHash);
+};
+
+const _shashMap = (value: Map<unknown, unknown>, hash: number, depth: number): number => {
+  let mapHash = 0;
+  for (const [k, v] of value) {
+    let entryHash = _shash(k, 0x811c9dc5, depth);
+    entryHash = _shash(v, entryHash, depth);
+    mapHash = (mapHash + entryHash) | 0; // order-independent hash by summing entry hashes (32-bit)
+  }
+  return _mix(hash, mapHash);
+};
+
+const _shashSet = (value: Set<unknown>, hash: number, depth: number): number => {
+  let setHash = 0;
+  for (const v of value) {
+    setHash = (setHash + _shash(v, 0x811c9dc5, depth)) | 0; // order-independent hash by summing element hashes (32-bit)
+  }
+  return _mix(hash, setHash);
+};
+
+const _shashDate = (value: Date, hash: number): number => {
+  hash = _mix(hash, 0x14);
+  const time = value.getTime();
+  if (time !== time) return _mix(hash, 0x04); // invalid dates are equal whatever their NaN bits
+  _f64[0] = time;
+  for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]!);
+  return hash;
+};
+
+/** `DataView`s compare by the bytes they cover and their `byteOffset`, which is not hashed. */
+const _shashDataView = (value: DataView, hash: number): number =>
+  _mixBytes(_mix(hash, 0x18), _viewBytes(value));
 
 /** Typed arrays and `DataView`, which compare by contents and `byteOffset`. */
 const _shashView = (value: ArrayBufferView, hash: number, depth: number): number => {
-  if (value instanceof DataView) {
-    hash = _mix(hash, 0x18);
-    return _mixBytes(hash, new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
-  }
+  if (_typedArrayTag.call(value) === undefined) return _shashDataView(value as DataView, hash);
   // Elements compare with `!==`, and NaN equals NaN in float arrays; the number path
   // normalizes NaN and -0 to match. `byteOffset` is compared but not hashed.
   hash = _mix(hash, 0x16);
@@ -131,47 +242,103 @@ const _shashView = (value: ArrayBufferView, hash: number, depth: number): number
 };
 
 /**
- * Built-ins that keep their contents out of enumerable own properties, or `undefined` for any
- * other object. Only called for objects with no enumerable own keys, so plain objects skip it.
+ * Any object the cases in `_shash` do not take: class instances, built-ins from another realm
+ * (such as a `vm` context), and objects fast-equals has no comparator for. fast-equals picks
+ * their comparison by tag, and so does this. Content-compared built-ins ignore enumerable own
+ * keys, so they are hashed by contents alone. An object that borrows a built-in's tag without
+ * being one gets a fixed hash per tag, which is coarser than whatever fast-equals compares.
  */
-const _shashBuiltin = (value: object, hash: number, depth: number): number | undefined => {
-  if (value instanceof ArrayBuffer) {
-    return _mixBytes(_mix(hash, 0x17), new Uint8Array(value));
-  }
-  if (value instanceof Error) {
-    // `stack` is compared too, but hashing it would cost a long string per error for no gain,
-    // since it differs by construction site. An error with enumerable own properties (such as
-    // Node's `code`) never gets here; hashing those alone is coarser, so it is still safe.
-    hash = _shash(value.name, _mix(hash, 0x19), depth);
-    hash = _shash(value.message, hash, depth);
-    return _shash(value.cause, hash, depth);
-  }
-  if (typeof URL === "function" && value instanceof URL) {
-    // Equal when `href` matches, or the components below match and the query holds the same
-    // `&`-separated pairs in any order, so the pairs are summed rather than hashed in sequence.
-    hash = _shash(value.protocol, _mix(hash, 0x1a), depth);
-    hash = _shash(value.username, hash, depth);
-    hash = _shash(value.password, hash, depth);
-    hash = _shash(value.host, hash, depth);
-    hash = _shash(value.pathname, hash, depth);
-    hash = _shash(value.hash, hash, depth);
-    let paramsHash = 0;
-    for (const pair of value.searchParams.toString().split("&")) {
-      paramsHash = (paramsHash + _mixStr(0x811c9dc5, pair)) | 0;
+const _shashTagged = (value: object, hash: number, depth: number): number => {
+  const tag = _toString.call(value);
+  switch (tag) {
+    case "[object Object]":
+      // fast-equals compares a thenable class instance by reference, like a `Promise`.
+      return typeof (value as { then?: unknown }).then === "function"
+        ? _shashIdentity(value, hash)
+        : _shashKeys(value, hash, depth);
+    case "[object Arguments]":
+      return _shashKeys(value, hash, depth);
+    case "[object Error]": {
+      // Compared by `name`, `message`, `stack`, `cause` and own enumerable keys. `stack` is left
+      // out, since it costs a long string per error and differs by construction site anyway.
+      const error = value as Error;
+      hash = _shash(error.name, _mix(hash, 0x19), depth);
+      hash = _shash(error.message, hash, depth);
+      hash = _shash(error.cause, hash, depth);
+      return _shashKeys(value, hash, depth);
     }
-    return _mix(hash, paramsHash);
+    case "[object Map]":
+      return _isBrand(_mapSize, value)
+        ? _shashMap(value as Map<unknown, unknown>, hash, depth)
+        : _mix(hash, 0x1d);
+    case "[object Set]":
+      return _isBrand(_setSize, value) ? _shashSet(value as Set<unknown>, hash, depth) : _mix(hash, 0x1e);
+    case "[object Date]":
+      return _isBrand(_getTime, value) ? _shashDate(value as Date, hash) : _mix(hash, 0x14);
+    case "[object RegExp]": {
+      const regExp = value as RegExp;
+      return _shash(regExp.flags, _shash(regExp.source, _mix(hash, 0x15), depth), depth);
+    }
+    case "[object Number]":
+    case "[object String]":
+    case "[object Boolean]":
+    case "[object BigInt]": {
+      // Compared with `Object.is` on `valueOf()`; the number path merges 0 and -0, which is coarser.
+      const valueOf = (value as { valueOf?: unknown }).valueOf;
+      const primitive = typeof valueOf === "function" ? valueOf.call(value) : value;
+      return typeof primitive === "object" || typeof primitive === "function"
+        ? _mix(hash, 0x1b)
+        : _shash(primitive, _mix(hash, 0x1b), depth);
+    }
+    case "[object URL]":
+      return _shashUrl(value as URL, hash, depth);
+    case "[object ArrayBuffer]":
+      return _mixBytes(_mix(hash, 0x17), new Uint8Array(value as ArrayBuffer));
+    case "[object DataView]":
+      return _shashDataView(value as DataView, hash);
+    // Real arrays and typed arrays never get here, so these only borrow the tag.
+    case "[object Array]":
+    case "[object Int8Array]":
+    case "[object Uint8Array]":
+    case "[object Uint8ClampedArray]":
+    case "[object Int16Array]":
+    case "[object Uint16Array]":
+    case "[object Int32Array]":
+    case "[object Uint32Array]":
+    case "[object Float16Array]":
+    case "[object Float32Array]":
+    case "[object Float64Array]":
+    case "[object BigInt64Array]":
+    case "[object BigUint64Array]":
+      return _mix(hash, 0x1f);
+    default:
+      // fast-equals has no comparator for this tag, so it compares by reference.
+      return _shashIdentity(value, hash);
   }
-  if (
-    value instanceof Number ||
-    value instanceof String ||
-    value instanceof Boolean ||
-    value instanceof BigInt
-  ) {
-    // Compared with `Object.is` on `valueOf()`; the number path merges 0 and -0, which is coarser.
-    // A non-empty `String` wrapper has index keys, so it never gets here and hashes by those.
-    return _shash(value.valueOf(), _mix(hash, 0x1b), depth);
+};
+
+/**
+ * Equal when `href` matches, or the components below match and the query holds the same
+ * `&`-separated pairs in any order, so the pairs are summed rather than hashed in sequence.
+ */
+const _shashUrl = (value: URL, hash: number, depth: number): number => {
+  let searchParams: string;
+  try {
+    searchParams = value.searchParams.toString();
+  } catch {
+    return _mix(hash, 0x1a); // only borrows the tag
   }
-  return undefined;
+  hash = _shash(value.protocol, _mix(hash, 0x1a), depth);
+  hash = _shash(value.username, hash, depth);
+  hash = _shash(value.password, hash, depth);
+  hash = _shash(value.host, hash, depth);
+  hash = _shash(value.pathname, hash, depth);
+  hash = _shash(value.hash, hash, depth);
+  let paramsHash = 0;
+  for (const pair of searchParams.split("&")) {
+    paramsHash = (paramsHash + _mixStr(0x811c9dc5, pair)) | 0;
+  }
+  return _mix(hash, paramsHash);
 };
 
 const _shash = (value: unknown, hash: number, depth: number): number => {
@@ -212,61 +379,14 @@ const _shash = (value: unknown, hash: number, depth: number): number => {
     for (let i = 0; i < value.length; i++) hash = _shash(value[i], hash, depth);
     return hash;
   }
-  if (value instanceof Map) {
-    let mapHash = 0;
-    for (const [k, v] of value) {
-      let entryHash = _shash(k, 0x811c9dc5, depth);
-      entryHash = _shash(v, entryHash, depth);
-      mapHash = (mapHash + entryHash) | 0; // order-independent hash by summing entry hashes (32-bit)
-    }
-    return _mix(hash, mapHash);
-  }
-  if (value instanceof Set) {
-    let setHash = 0;
-    for (const v of value) {
-      setHash = (setHash + _shash(v, 0x811c9dc5, depth)) | 0; // order-independent hash by summing element hashes (32-bit)
-    }
-    return _mix(hash, setHash);
-  }
-  if (value instanceof Date) {
-    hash = _mix(hash, 0x14);
-    const time = value.getTime();
-    if (time !== time) return _mix(hash, 0x04); // invalid dates are equal whatever their NaN bits
-    _f64[0] = time;
-    for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]!);
-    return hash;
-  }
-  if (value instanceof RegExp) {
-    hash = _mix(hash, 0x15);
-    return _mixStr(hash, value.toString());
-  }
-
+  const constructor = (value as { constructor?: unknown }).constructor;
+  if (constructor === Object || constructor == null) return _shashKeys(value as object, hash, depth);
+  if (value instanceof Map) return _shashMap(value, hash, depth);
+  if (value instanceof Set) return _shashSet(value, hash, depth);
+  if (value instanceof Date) return _shashDate(value, hash);
+  if (value instanceof RegExp) return _mixStr(_mix(hash, 0x15), value.toString());
   if (ArrayBuffer.isView(value)) return _shashView(value, hash, depth);
-
-  // Plain object: order-independent
-  const keys = Object.keys(value as object);
-  if (keys.length === 0) {
-    const builtinHash = _shashBuiltin(value as object, hash, depth);
-    if (builtinHash !== undefined) return builtinHash;
-  }
-  hash = _mix(hash, 0x13);
-  let objHash = 0;
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i]!;
-    // fast-equals skips these keys on React and Preact elements, so hashing them would be finer than equality.
-    if (
-      key.charCodeAt(0) === 95 && // "_"
-      (key === "_owner" || key === "__o" || key === "__v") &&
-      (value as { $$typeof?: unknown }).$$typeof
-    ) {
-      continue;
-    }
-    let pairHash = _mixStr(0x811c9dc5, key);
-    pairHash = _shash((value as Record<string, unknown>)[key], pairHash, depth);
-    objHash = (objHash + pairHash) | 0;
-  }
-
-  return _mix(hash, objHash);
+  return _shashTagged(value as object, hash, depth);
 };
 
 /**
@@ -297,7 +417,7 @@ const _find = <T>(
   map: Slots<T>,
   key: number,
   value: unknown,
-  equal: typeof deepEqual
+  equal: typeof _deepEqual
 ): T | typeof _NONE => {
   const slot = map.get(key);
   if (slot instanceof Bucket) {
@@ -412,9 +532,9 @@ export class MapSet<T> {
   }
 
   add(value: T): this {
-    if (this.#probing && shallowEqual(value, this.#last)) return this;
+    if (this.#probing && _shallowEqual(value, this.#last)) return this;
     const key = _key(value);
-    const equal = _deep ? _circularEqual : deepEqual;
+    const equal = _deep ? _circularEqual : _deepEqual;
     const slot = this.#map.get(key);
     // `get()` also returns `undefined` for a stored `undefined`, so confirm the miss.
     if (slot === undefined && !this.#map.has(key)) {
@@ -446,14 +566,14 @@ export class MapSet<T> {
   /** The stored value equal to `value`, or `_NONE`. */
   #find(value: unknown): T | typeof _NONE {
     const key = _key(value);
-    return _find(this.#map, key, value, _deep ? _circularEqual : deepEqual);
+    return _find(this.#map, key, value, _deep ? _circularEqual : _deepEqual);
   }
 
   delete(value: T): boolean {
     this.#last = undefined; // it may be the value deleted
     this.#probing = false;
     const key = _key(value);
-    const equal = _deep ? _circularEqual : deepEqual;
+    const equal = _deep ? _circularEqual : _deepEqual;
     const slot = this.#map.get(key);
     if (slot instanceof Bucket) {
       const items = slot.items;
@@ -576,7 +696,7 @@ export class MapSet<T> {
     } else {
       for (const value of _keysOf(rec)) {
         const key = _key(value);
-        const item = _find(this.#map, key, value, _deep ? _circularEqual : deepEqual);
+        const item = _find(this.#map, key, value, _deep ? _circularEqual : _deepEqual);
         // Keeps this set's value rather than `other`'s, so the result holds values of this set
         // whichever side drove the loop. Equal values from `other` all find the same one.
         if (item !== _NONE && !_holds(map, key, item)) {
@@ -604,7 +724,7 @@ export class MapSet<T> {
     } else {
       for (const value of _keysOf(rec)) {
         const key = _key(value);
-        const item = _find(map, key, value, _deep ? _circularEqual : deepEqual);
+        const item = _find(map, key, value, _deep ? _circularEqual : _deepEqual);
         if (item !== _NONE) {
           _remove(map, key, item);
           result.#size--;
@@ -622,7 +742,7 @@ export class MapSet<T> {
     const map = result.#map;
     for (const value of keys) {
       const key = _key(value);
-      const equal = _deep ? _circularEqual : deepEqual;
+      const equal = _deep ? _circularEqual : _deepEqual;
       const inResult = _find(map, key, value, equal);
       if (_find(this.#map, key, value, equal) !== _NONE) {
         if (inResult !== _NONE) {

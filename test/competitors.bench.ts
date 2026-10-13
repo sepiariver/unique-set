@@ -1,10 +1,12 @@
 import { bench, describe } from "vitest";
 import { adapters, type Adapter } from "./competitors/adapters";
-import { withMirroredDuplicates, type Workload } from "./competitors/workload";
+import { mirror, withMirroredDuplicates, type Workload } from "./competitors/workload";
+import { corpusRecords } from "./fixtures/corpus";
 import { flatDataset, hasWorkload, nestedDataset, type Dataset } from "./fixtures/datasets";
 import { hashItRecords, hashItStairs } from "./fixtures/hash-it";
 import { lodashNearMisses } from "./fixtures/lodash";
 import { createBenchObjects } from "./fixtures/ohash";
+import { superjsonDateRecords } from "./fixtures/superjson";
 
 const count = (n: number): string => n.toLocaleString("en-US");
 
@@ -37,6 +39,30 @@ const workloads: Workload[] = [
   {
     name: "lodash isEqual near-misses: 1,000 unique + mirrored duplicates",
     items: withMirroredDuplicates(lodashNearMisses(1_000), 6),
+    expectedSize: 1_000,
+  },
+  {
+    name: "superjson Date records (82 Dates each): 1,000 unique + mirrored duplicates",
+    items: withMirroredDuplicates(superjsonDateRecords(1_000), 7),
+    expectedSize: 1_000,
+  },
+  (() => {
+    // Each duplicate is a mirrored structured clone, so it shares no reference with its original.
+    const records = corpusRecords(5);
+    return {
+      name: `WPT, devalue and superjson value mix: ${count(records.length)} unique + cloned duplicates`,
+      items: withMirroredDuplicates(records, 8, (record) => mirror(structuredClone(record))),
+      expectedSize: records.length,
+    };
+  })(),
+  {
+    // fast-equals compares URLSearchParams by reference, and they have no enumerable state to
+    // hash, so all of them share one MapSet key. Each repeat is the same reference.
+    name: "devalue URLSearchParams: 1,000 unique + repeated references",
+    items: withMirroredDuplicates(
+      Array.from({ length: 1_000 }, (_, i) => new URLSearchParams(`foo=${i}&foo=2&baz=<+>`)),
+      9,
+    ),
     expectedSize: 1_000,
   },
   ...(

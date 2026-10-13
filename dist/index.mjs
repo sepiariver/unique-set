@@ -1,9 +1,5 @@
 // index.ts
-import {
-  createCustomEqual,
-  deepEqual,
-  shallowEqual
-} from "fast-equals";
+import { createCustomEqual } from "fast-equals";
 var _f64 = new Float64Array(1);
 var _u8 = new Uint8Array(_f64.buffer);
 var structuralHash = (value) => {
@@ -25,9 +21,31 @@ var _pairing = (areItemsEqual) => (a, b, state) => {
   else cache.delete(b);
   return result;
 };
+var _viewBytes = (view) => {
+  try {
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  } catch {
+    return new Uint8Array(0);
+  }
+};
+var _areDataViewsEqual = (a, b) => {
+  const x = _viewBytes(a);
+  const y = _viewBytes(b);
+  if (x.length !== y.length || x.byteOffset !== y.byteOffset) return false;
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+};
+var _deepEqual = createCustomEqual({
+  createCustomConfig: () => ({ areDataViewsEqual: _areDataViewsEqual })
+});
+var _shallowEqual = createCustomEqual({
+  createInternalComparator: () => Object.is,
+  createCustomConfig: () => ({ areDataViewsEqual: _areDataViewsEqual })
+});
 var _circularEqual = createCustomEqual({
   createState: () => ({ cache: /* @__PURE__ */ new WeakMap(), meta: void 0 }),
   createCustomConfig: (config) => ({
+    areDataViewsEqual: _areDataViewsEqual,
     areArraysEqual: _pairing(config.areArraysEqual),
     areErrorsEqual: _pairing(config.areErrorsEqual),
     areMapsEqual: _pairing(config.areMapsEqual),
@@ -66,42 +84,152 @@ var _mixBytes = (hash, bytes) => {
   for (let i = 0; i < bytes.length; i++) hash = _mix(hash, bytes[i]);
   return hash;
 };
-var _shashView = (value, hash, depth) => {
-  if (value instanceof DataView) {
-    hash = _mix(hash, 24);
-    return _mixBytes(hash, new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+var _toString = Object.prototype.toString;
+var _mapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size").get;
+var _setSize = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
+var _getTime = Date.prototype.getTime;
+var _typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Int8Array.prototype),
+  Symbol.toStringTag
+).get;
+var _isBrand = (method, value) => {
+  try {
+    method.call(value);
+    return true;
+  } catch {
+    return false;
   }
+};
+var _ids = /* @__PURE__ */ new WeakMap();
+var _nextId = 0;
+var _shashIdentity = (value, hash) => {
+  let id = _ids.get(value);
+  if (id === void 0) _ids.set(value, id = _nextId++);
+  return _mix(_mix(hash, 28), id);
+};
+var _shashKeys = (value, hash, depth) => {
+  const keys = Object.keys(value);
+  hash = _mix(hash, 19);
+  let objHash = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (key.charCodeAt(0) === 95 && // "_"
+    (key === "_owner" || key === "__o" || key === "__v") && value.$$typeof) {
+      continue;
+    }
+    let pairHash = _mixStr(2166136261, key);
+    pairHash = _shash(value[key], pairHash, depth);
+    objHash = objHash + pairHash | 0;
+  }
+  return _mix(hash, objHash);
+};
+var _shashMap = (value, hash, depth) => {
+  let mapHash = 0;
+  for (const [k, v] of value) {
+    let entryHash = _shash(k, 2166136261, depth);
+    entryHash = _shash(v, entryHash, depth);
+    mapHash = mapHash + entryHash | 0;
+  }
+  return _mix(hash, mapHash);
+};
+var _shashSet = (value, hash, depth) => {
+  let setHash = 0;
+  for (const v of value) {
+    setHash = setHash + _shash(v, 2166136261, depth) | 0;
+  }
+  return _mix(hash, setHash);
+};
+var _shashDate = (value, hash) => {
+  hash = _mix(hash, 20);
+  const time = value.getTime();
+  if (time !== time) return _mix(hash, 4);
+  _f64[0] = time;
+  for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]);
+  return hash;
+};
+var _shashDataView = (value, hash) => _mixBytes(_mix(hash, 24), _viewBytes(value));
+var _shashView = (value, hash, depth) => {
+  if (_typedArrayTag.call(value) === void 0) return _shashDataView(value, hash);
   hash = _mix(hash, 22);
   const items = value;
   for (let i = 0; i < items.length; i++) hash = _shash(items[i], hash, depth);
   return hash;
 };
-var _shashBuiltin = (value, hash, depth) => {
-  if (value instanceof ArrayBuffer) {
-    return _mixBytes(_mix(hash, 23), new Uint8Array(value));
-  }
-  if (value instanceof Error) {
-    hash = _shash(value.name, _mix(hash, 25), depth);
-    hash = _shash(value.message, hash, depth);
-    return _shash(value.cause, hash, depth);
-  }
-  if (typeof URL === "function" && value instanceof URL) {
-    hash = _shash(value.protocol, _mix(hash, 26), depth);
-    hash = _shash(value.username, hash, depth);
-    hash = _shash(value.password, hash, depth);
-    hash = _shash(value.host, hash, depth);
-    hash = _shash(value.pathname, hash, depth);
-    hash = _shash(value.hash, hash, depth);
-    let paramsHash = 0;
-    for (const pair of value.searchParams.toString().split("&")) {
-      paramsHash = paramsHash + _mixStr(2166136261, pair) | 0;
+var _shashTagged = (value, hash, depth) => {
+  const tag = _toString.call(value);
+  switch (tag) {
+    case "[object Object]":
+      return typeof value.then === "function" ? _shashIdentity(value, hash) : _shashKeys(value, hash, depth);
+    case "[object Arguments]":
+      return _shashKeys(value, hash, depth);
+    case "[object Error]": {
+      const error = value;
+      hash = _shash(error.name, _mix(hash, 25), depth);
+      hash = _shash(error.message, hash, depth);
+      hash = _shash(error.cause, hash, depth);
+      return _shashKeys(value, hash, depth);
     }
-    return _mix(hash, paramsHash);
+    case "[object Map]":
+      return _isBrand(_mapSize, value) ? _shashMap(value, hash, depth) : _mix(hash, 29);
+    case "[object Set]":
+      return _isBrand(_setSize, value) ? _shashSet(value, hash, depth) : _mix(hash, 30);
+    case "[object Date]":
+      return _isBrand(_getTime, value) ? _shashDate(value, hash) : _mix(hash, 20);
+    case "[object RegExp]": {
+      const regExp = value;
+      return _shash(regExp.flags, _shash(regExp.source, _mix(hash, 21), depth), depth);
+    }
+    case "[object Number]":
+    case "[object String]":
+    case "[object Boolean]":
+    case "[object BigInt]": {
+      const valueOf = value.valueOf;
+      const primitive = typeof valueOf === "function" ? valueOf.call(value) : value;
+      return typeof primitive === "object" || typeof primitive === "function" ? _mix(hash, 27) : _shash(primitive, _mix(hash, 27), depth);
+    }
+    case "[object URL]":
+      return _shashUrl(value, hash, depth);
+    case "[object ArrayBuffer]":
+      return _mixBytes(_mix(hash, 23), new Uint8Array(value));
+    case "[object DataView]":
+      return _shashDataView(value, hash);
+    // Real arrays and typed arrays never get here, so these only borrow the tag.
+    case "[object Array]":
+    case "[object Int8Array]":
+    case "[object Uint8Array]":
+    case "[object Uint8ClampedArray]":
+    case "[object Int16Array]":
+    case "[object Uint16Array]":
+    case "[object Int32Array]":
+    case "[object Uint32Array]":
+    case "[object Float16Array]":
+    case "[object Float32Array]":
+    case "[object Float64Array]":
+    case "[object BigInt64Array]":
+    case "[object BigUint64Array]":
+      return _mix(hash, 31);
+    default:
+      return _shashIdentity(value, hash);
   }
-  if (value instanceof Number || value instanceof String || value instanceof Boolean || value instanceof BigInt) {
-    return _shash(value.valueOf(), _mix(hash, 27), depth);
+};
+var _shashUrl = (value, hash, depth) => {
+  let searchParams;
+  try {
+    searchParams = value.searchParams.toString();
+  } catch {
+    return _mix(hash, 26);
   }
-  return void 0;
+  hash = _shash(value.protocol, _mix(hash, 26), depth);
+  hash = _shash(value.username, hash, depth);
+  hash = _shash(value.password, hash, depth);
+  hash = _shash(value.host, hash, depth);
+  hash = _shash(value.pathname, hash, depth);
+  hash = _shash(value.hash, hash, depth);
+  let paramsHash = 0;
+  for (const pair of searchParams.split("&")) {
+    paramsHash = paramsHash + _mixStr(2166136261, pair) | 0;
+  }
+  return _mix(hash, paramsHash);
 };
 var _shash = (value, hash, depth) => {
   if (value === null) return _mix(hash, 0);
@@ -138,53 +266,14 @@ var _shash = (value, hash, depth) => {
     for (let i = 0; i < value.length; i++) hash = _shash(value[i], hash, depth);
     return hash;
   }
-  if (value instanceof Map) {
-    let mapHash = 0;
-    for (const [k, v] of value) {
-      let entryHash = _shash(k, 2166136261, depth);
-      entryHash = _shash(v, entryHash, depth);
-      mapHash = mapHash + entryHash | 0;
-    }
-    return _mix(hash, mapHash);
-  }
-  if (value instanceof Set) {
-    let setHash = 0;
-    for (const v of value) {
-      setHash = setHash + _shash(v, 2166136261, depth) | 0;
-    }
-    return _mix(hash, setHash);
-  }
-  if (value instanceof Date) {
-    hash = _mix(hash, 20);
-    const time = value.getTime();
-    if (time !== time) return _mix(hash, 4);
-    _f64[0] = time;
-    for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]);
-    return hash;
-  }
-  if (value instanceof RegExp) {
-    hash = _mix(hash, 21);
-    return _mixStr(hash, value.toString());
-  }
+  const constructor = value.constructor;
+  if (constructor === Object || constructor == null) return _shashKeys(value, hash, depth);
+  if (value instanceof Map) return _shashMap(value, hash, depth);
+  if (value instanceof Set) return _shashSet(value, hash, depth);
+  if (value instanceof Date) return _shashDate(value, hash);
+  if (value instanceof RegExp) return _mixStr(_mix(hash, 21), value.toString());
   if (ArrayBuffer.isView(value)) return _shashView(value, hash, depth);
-  const keys = Object.keys(value);
-  if (keys.length === 0) {
-    const builtinHash = _shashBuiltin(value, hash, depth);
-    if (builtinHash !== void 0) return builtinHash;
-  }
-  hash = _mix(hash, 19);
-  let objHash = 0;
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
-    if (key.charCodeAt(0) === 95 && // "_"
-    (key === "_owner" || key === "__o" || key === "__v") && value.$$typeof) {
-      continue;
-    }
-    let pairHash = _mixStr(2166136261, key);
-    pairHash = _shash(value[key], pairHash, depth);
-    objHash = objHash + pairHash | 0;
-  }
-  return _mix(hash, objHash);
+  return _shashTagged(value, hash, depth);
 };
 var _key = (value) => _hashRoot(value) | 0;
 var Bucket = class {
@@ -273,9 +362,9 @@ var MapSet = class _MapSet {
     }
   }
   add(value) {
-    if (this.#probing && shallowEqual(value, this.#last)) return this;
+    if (this.#probing && _shallowEqual(value, this.#last)) return this;
     const key = _key(value);
-    const equal = _deep ? _circularEqual : deepEqual;
+    const equal = _deep ? _circularEqual : _deepEqual;
     const slot = this.#map.get(key);
     if (slot === void 0 && !this.#map.has(key)) {
       this.#map.set(key, value);
@@ -303,13 +392,13 @@ var MapSet = class _MapSet {
   /** The stored value equal to `value`, or `_NONE`. */
   #find(value) {
     const key = _key(value);
-    return _find(this.#map, key, value, _deep ? _circularEqual : deepEqual);
+    return _find(this.#map, key, value, _deep ? _circularEqual : _deepEqual);
   }
   delete(value) {
     this.#last = void 0;
     this.#probing = false;
     const key = _key(value);
-    const equal = _deep ? _circularEqual : deepEqual;
+    const equal = _deep ? _circularEqual : _deepEqual;
     const slot = this.#map.get(key);
     if (slot instanceof Bucket) {
       const items = slot.items;
@@ -416,7 +505,7 @@ var MapSet = class _MapSet {
     } else {
       for (const value of _keysOf(rec)) {
         const key = _key(value);
-        const item = _find(this.#map, key, value, _deep ? _circularEqual : deepEqual);
+        const item = _find(this.#map, key, value, _deep ? _circularEqual : _deepEqual);
         if (item !== _NONE && !_holds(map, key, item)) {
           _insert(map, key, item);
           result.#size++;
@@ -441,7 +530,7 @@ var MapSet = class _MapSet {
     } else {
       for (const value of _keysOf(rec)) {
         const key = _key(value);
-        const item = _find(map, key, value, _deep ? _circularEqual : deepEqual);
+        const item = _find(map, key, value, _deep ? _circularEqual : _deepEqual);
         if (item !== _NONE) {
           _remove(map, key, item);
           result.#size--;
@@ -458,7 +547,7 @@ var MapSet = class _MapSet {
     const map = result.#map;
     for (const value of keys) {
       const key = _key(value);
-      const equal = _deep ? _circularEqual : deepEqual;
+      const equal = _deep ? _circularEqual : _deepEqual;
       const inResult = _find(map, key, value, equal);
       if (_find(this.#map, key, value, equal) !== _NONE) {
         if (inResult !== _NONE) {
