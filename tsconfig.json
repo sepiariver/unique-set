@@ -18,6 +18,8 @@
     /* Completeness */
     "skipLibCheck": true,                                /* Skip type checking all .d.ts files. */
     "noUncheckedIndexedAccess": true,
-    "noEmit": true
-  }
+    "noEmit": true,
+    "types": []                                          /* Keep the library environment-agnostic; tests add Node types in test/tsconfig.json. */
+  },
+  "include": ["index.ts"]
 }

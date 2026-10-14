@@ -1,6 +1,6 @@
 {
   "name": "@sepiariver/unique-set",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "A Set-like collection that deduplicates by deep value equality using a streaming structural hash and fast-equals.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -10,10 +10,10 @@
     "import": "./dist/index.mjs"
   },
   "scripts": {
-    "test": "npm run build && vitest basic.spec.ts",
-    "bench": "npm run build && vitest bench.spec.ts bench-nested.spec.ts",
-    "bench-large": "NODE_OPTIONS='--max-old-space-size=4096' npm run build && vitest bench-large.spec.ts",
-    "lint": "tsc",
+    "test": "npm run build && vitest run basic.spec.ts extra.spec.ts property.spec.ts datasets.spec.ts set-parity.spec.ts corpus.spec.ts",
+    "bench": "npm run build && vitest bench --run",
+    "bench-large": "npm run build && NODE_OPTIONS='--max-old-space-size=4096' vitest run bench-large.spec.ts --reporter=verbose",
+    "lint": "tsc && tsc -p test",
     "build": "tsup index.ts --format esm,cjs --dts"
   },
   "repository": {
@@ -35,12 +35,21 @@
   },
   "homepage": "https://github.com/sepiariver/unique-set#readme",
   "dependencies": {
-    "fast-equals": "^6.0.0"
+    "fast-equals": "^6.1.1"
   },
   "devDependencies": {
+    "@rimbu/common": "^2.0.7",
+    "@rimbu/hashed": "^2.1.10",
+    "@types/lodash": "^4.17.26",
+    "@types/node": "^22.20.5",
     "deep-equality-data-structures": "^2.0.0",
-    "tsup": "^8.3.5",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "fast-check": "^4.10.2",
+    "hash-it": "^7.1.1",
+    "immutable": "^5.1.9",
+    "lodash": "^4.18.1",
+    "ohash": "^2.0.12",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
   }
 }

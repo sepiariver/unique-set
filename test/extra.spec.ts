@@ -1,0 +1,558 @@
+import { MapSet, structuralHash } from "../dist/index.mjs";
+import { deepEqual } from "fast-equals";
+import vm from "node:vm";
+import { describe, it, expect } from "vitest";
+import {
+  collidingObjects,
+  collidingStrings,
+  collidingWithUndefined,
+} from "./fixtures/collisions";
+
+const [strA, strB] = collidingStrings;
+const [objA, objB] = collidingObjects;
+const [undefA, undefB, undefC] = collidingWithUndefined;
+
+describe("collision fixtures", () => {
+  it("still collide under the current hash", () => {
+    expect(structuralHash(strB)).toBe(structuralHash(strA));
+    expect(structuralHash(objB)).toBe(structuralHash(objA));
+    for (const s of collidingWithUndefined) {
+      expect(structuralHash(s)).toBe(structuralHash(undefined));
+    }
+  });
+});
+
+describe("MapSet with colliding values", () => {
+  it("stores colliding values separately and deduplicates among them", () => {
+    const set = new MapSet<unknown>([strA, strB, strA, strB]);
+    expect(set.size).toBe(2);
+    expect(set.has(strA)).toBe(true);
+    expect(set.has(strB)).toBe(true);
+
+    // Fresh objects, so equality goes through fast-equals rather than reference identity.
+    const objects = new MapSet<unknown>([{ ...objA }, { ...objB }, { ...objA }, { ...objB }]);
+    expect(objects.size).toBe(2);
+    expect(objects.has({ ...objA })).toBe(true);
+    expect(objects.has({ ...objB })).toBe(true);
+    expect(objects.has({ s: "other" })).toBe(false);
+  });
+
+  it("misses a value that shares a key with one or several stored values", () => {
+    const set = new MapSet<unknown>([undefA]);
+    expect(set.has(undefB)).toBe(false); // same key, lone value
+    expect(set.delete(undefB)).toBe(false);
+    set.add(undefB);
+    expect(set.has(undefC)).toBe(false); // same key, several values
+    expect(set.delete(undefC)).toBe(false);
+    expect(set.size).toBe(2);
+  });
+
+  it("keeps the remaining value's place on delete, and appends a re-added one", () => {
+    const set = new MapSet<unknown>([strA, strB]);
+    expect(set.delete(strA)).toBe(true);
+    expect(set.size).toBe(1);
+    expect(set.has(strA)).toBe(false);
+    expect(set.has(strB)).toBe(true);
+    expect([...set]).toEqual([strB]);
+
+    set.add(strA);
+    expect(set.size).toBe(2);
+    expect([...set]).toEqual([strB, strA]);
+
+    expect(set.delete(strB)).toBe(true);
+    expect(set.delete(strA)).toBe(true);
+    expect(set.size).toBe(0);
+    expect([...set]).toEqual([]);
+  });
+
+  it("deletes the middle of three values that share a key", () => {
+    const set = new MapSet<unknown>(collidingWithUndefined);
+    expect(set.delete(undefB)).toBe(true);
+    expect([...set]).toEqual([undefA, undefC]);
+    expect(set.size).toBe(2);
+  });
+
+  it("iterates colliding values in insertion order", () => {
+    const set = new MapSet(["first", strA, "middle", strB, "last"]);
+    expect([...set]).toEqual(["first", strA, "middle", strB, "last"]);
+
+    // Deleting the first of the pair keeps the second where it was.
+    set.delete(strA);
+    set.add("after");
+    expect([...set]).toEqual(["first", "middle", strB, "last", "after"]);
+    set.add(strA);
+    expect([...set]).toEqual(["first", "middle", strB, "last", "after", strA]);
+
+    const seen: string[] = [];
+    set.forEach((value, valueAgain, self) => {
+      expect(valueAgain).toBe(value);
+      expect(self).toBe(set);
+      seen.push(value);
+    });
+    expect(seen).toEqual([...set.values()]);
+  });
+});
+
+describe("MapSet with undefined", () => {
+  it("tells a stored undefined from an absent key", () => {
+    const set = new MapSet<unknown>();
+    expect(set.has(undefined)).toBe(false);
+    expect(set.delete(undefined)).toBe(false);
+
+    set.add(undefA);
+    expect(set.has(undefined)).toBe(false); // undefined's key holds only a colliding string
+    expect(set.delete(undefined)).toBe(false);
+    expect(set.size).toBe(1);
+  });
+
+  it("shares a key with values that collide with it", () => {
+    const set = new MapSet<unknown>([undefined, undefined]);
+    expect(set.size).toBe(1);
+    expect(set.has(undefA)).toBe(false);
+    expect(set.delete(undefA)).toBe(false);
+
+    set.add(undefA);
+    set.add(undefined);
+    expect(set.size).toBe(2);
+    expect([...set]).toEqual([undefined, undefA]);
+
+    expect(set.delete(undefined)).toBe(true);
+    expect(set.has(undefined)).toBe(false);
+    expect(set.has(undefA)).toBe(true);
+    expect([...set]).toEqual([undefA]);
+
+    // The string is alone at the key again; undefined can join it.
+    set.add(undefined);
+    expect([...set]).toEqual([undefA, undefined]);
+    expect(set.delete(undefA)).toBe(true);
+    expect(set.has(undefined)).toBe(true);
+    expect(set.delete(undefined)).toBe(true);
+    expect(set.size).toBe(0);
+  });
+});
+
+// fast-equals defines equality, and its semantics have changed within 6.x. Each case pins one
+// behavior that differs from 6.0.0, so a dependency bump that changes it fails here by name.
+describe("fast-equals 6.1.1 semantics through MapSet", () => {
+  it("compares URL query strings", () => {
+    const set = new MapSet([new URL("https://a.test/p?x=1"), new URL("https://a.test/p?x=2")]);
+    expect(set.size).toBe(2);
+  });
+
+  it("ignores URL query parameter order", () => {
+    const set = new MapSet([new URL("https://a.test/p?x=1&y=2"), new URL("https://a.test/p?y=2&x=1")]);
+    expect(set.size).toBe(1);
+  });
+
+  it("treats NaN as equal to NaN in float typed arrays", () => {
+    expect(new MapSet([new Float64Array([NaN]), new Float64Array([NaN])]).size).toBe(1);
+  });
+
+  it("keeps a null-prototype object apart from a plain one", () => {
+    const bare = Object.assign(Object.create(null), { a: 1 });
+    expect(new MapSet<unknown>([{ a: 1 }, bare]).size).toBe(2);
+  });
+
+  it("compares Error causes deeply", () => {
+    // Built on one line, so the errors share a stack, which fast-equals also compares.
+    const errors = (causes: unknown[]) => causes.map((cause) => new Error("x", { cause }));
+    expect(new MapSet(errors([{ a: 1 }, { a: 1 }])).size).toBe(1);
+    expect(new MapSet(errors([{ a: 1 }, { a: 2 }])).size).toBe(2);
+  });
+});
+
+/** Every value is distinct, and each gets its own key rather than one shared per type. */
+function expectDistinctKeys(values: unknown[]): void {
+  expect(new MapSet(values).size).toBe(values.length);
+  expect(new Set(values.map(structuralHash)).size).toBe(values.length);
+}
+
+const range = (n: number) => Array.from({ length: n }, (_, i) => i);
+
+describe("structuralHash for built-ins", () => {
+  it("URL: hashes the query as unordered pairs", () => {
+    const pair = [new URL("https://a.test/p?x=1&y=2#h"), new URL("https://a.test/p?y=2&x=1#h")];
+    expect(structuralHash(pair[1])).toBe(structuralHash(pair[0]));
+    expectDistinctKeys(range(200).map((i) => new URL(`https://a.test/${i % 7}?q=${i}`)));
+    // Repeated keys form a multiset: a=1&a=2 equals a=2&a=1 but not a=1&a=1.
+    expect(new MapSet([new URL("https://a.test/?a=1&a=2"), new URL("https://a.test/?a=1&a=1")]).size).toBe(2);
+  });
+
+  it("Error: hashes name, message and cause", () => {
+    const errors = (messages: string[], cause?: unknown) =>
+      messages.map((message) => new Error(message, { cause }));
+    const [a, b] = errors(["m", "m"], { deep: [1] });
+    expect(structuralHash(b)).toBe(structuralHash(a));
+    expectDistinctKeys(errors(range(200).map(String)));
+    class CodedError extends Error {}
+    expect(structuralHash(new CodedError("m"))).not.toBe(structuralHash(new CodedError("n")));
+
+    // Enumerable own properties are compared too, so they are hashed alongside the message.
+    class HttpError extends Error {
+      constructor(public status: number) {
+        super("http");
+      }
+    }
+    const http = (statuses: number[]) => statuses.map((status) => new HttpError(status));
+    const [ok, okAgain] = http([200, 200]);
+    expect(structuralHash(okAgain)).toBe(structuralHash(ok));
+    expect(new MapSet(http([200, 200, 404])).size).toBe(2);
+  });
+
+  it("typed arrays: hashes elements, merging NaN and -0 as fast-equals does", () => {
+    expect(structuralHash(new Float64Array([NaN, 1]))).toBe(structuralHash(new Float64Array([NaN, 1])));
+    expect(structuralHash(new Float32Array([-0]))).toBe(structuralHash(new Float32Array([0])));
+    expect(new MapSet([new Float32Array([-0]), new Float32Array([0])]).size).toBe(1);
+    expectDistinctKeys(range(200).map((i) => new Uint16Array([i, i >> 3])));
+    expectDistinctKeys(range(200).map((i) => new BigInt64Array([BigInt(i) - 100n])));
+  });
+
+  it("typed arrays: keeps equal bytes at different offsets apart", () => {
+    const bytes = new Uint8Array([7, 7, 7]);
+    const views = [bytes.subarray(0, 2), bytes.subarray(1, 3)];
+    expect(structuralHash(views[1])).toBe(structuralHash(views[0])); // byteOffset is not hashed
+    expect(new MapSet(views).size).toBe(2);
+  });
+
+  it("ArrayBuffer and DataView: hashes bytes", () => {
+    const buffer = (i: number) => new Uint8Array([i & 0xff, i >> 8]).buffer;
+    expect(structuralHash(buffer(5))).toBe(structuralHash(buffer(5)));
+    expectDistinctKeys(range(300).map(buffer));
+
+    // DataViews compare the bytes they cover and their byteOffset, which is not hashed.
+    const views = [new DataView(new Uint8Array([0, 1, 2]).buffer, 1), new DataView(new Uint8Array([1, 2]).buffer)];
+    expect(structuralHash(views[1])).toBe(structuralHash(views[0]));
+    expect(new MapSet(views).size).toBe(2);
+    const outside = [new DataView(new Uint8Array([3, 1, 2]).buffer, 1), views[0]];
+    expect(new MapSet(outside).size).toBe(1);
+    expectDistinctKeys(range(300).map((i) => new DataView(buffer(i))));
+  });
+
+  it("boxed primitives: hashes valueOf()", () => {
+    expect(structuralHash(new String("s"))).toBe(structuralHash(new String("s")));
+    expectDistinctKeys([
+      ...range(100).map((i) => new Number(i)),
+      ...range(50).map((i) => Object(BigInt(i))),
+      new Boolean(true),
+      new Boolean(false),
+      new String(""),
+    ]);
+    // A non-empty String wrapper has enumerable index keys, which fast-equals ignores.
+    expectDistinctKeys(range(100).map((i) => new String(`s${i}`)));
+    // Object.is keeps 0 and -0 apart; sharing a key is coarser, so both are still stored.
+    expect(structuralHash(new Number(-0))).toBe(structuralHash(new Number(0)));
+    expect(new MapSet([new Number(0), new Number(-0)]).size).toBe(2);
+  });
+
+  it("Date: hashes every invalid date alike", () => {
+    expect(structuralHash(new Date(NaN))).toBe(structuralHash(new Date("not a date")));
+    expect(new MapSet([new Date(NaN), new Date("not a date")]).size).toBe(1);
+  });
+
+  it("React elements: skips the owner keys fast-equals skips", () => {
+    const $$typeof = Symbol.for("react.transitional.element");
+    const element = (owner: unknown) => ({ $$typeof, type: "div", props: { id: 1 }, _owner: owner });
+    const pair = [element({ name: "A" }), element({ name: "B" })];
+    expect(structuralHash(pair[1])).toBe(structuralHash(pair[0]));
+    expect(new MapSet(pair).size).toBe(1);
+
+    const preact = (o: unknown) => ({ $$typeof, type: "p", __o: o, __v: o });
+    expect(new MapSet([preact(1), preact(2)]).size).toBe(1);
+    // Without $$typeof, the same keys are ordinary data.
+    expect(new MapSet([{ _owner: 1 }, { _owner: 2 }]).size).toBe(2);
+  });
+});
+
+/** MapSet keeps one value per class of values that fast-equals calls equal. */
+function expectFastEqualsClasses(values: unknown[]): void {
+  const kept: unknown[] = [];
+  for (const value of values) if (!kept.some((other) => deepEqual(value, other))) kept.push(value);
+  expect(new MapSet(values).size).toBe(kept.length);
+}
+
+const realm = vm.createContext({});
+const fromRealm = <T>(source: string): ((i: number) => T) => vm.runInContext(source, realm);
+
+describe("objects compared by their toString tag", () => {
+  it("ignores enumerable own keys where fast-equals does", () => {
+    const tagged = <T extends object>(value: T) => Object.assign(value, { tag: 1 });
+    const pairs: [unknown, unknown][] = [
+      [tagged(new String("ab")), new String("ab")],
+      [tagged(new Number(1)), new Number(1)],
+      [tagged(new URL("https://a.test/")), new URL("https://a.test/")],
+      [tagged(new ArrayBuffer(2)), new ArrayBuffer(2)],
+    ];
+    for (const [a, b] of pairs) {
+      expect(deepEqual(a, b)).toBe(true);
+      expect(new MapSet([a, b]).size).toBe(1);
+    }
+  });
+
+  it("hashes built-ins from another realm by their contents", () => {
+    const makers = [
+      fromRealm<unknown>("(i) => new Map([['k', i]])"),
+      fromRealm<unknown>("(i) => new Set([i, 'x'])"),
+      fromRealm<unknown>("(i) => new Date(i * 1000)"),
+      fromRealm<unknown>("(i) => new RegExp('r' + i, 'g')"),
+      fromRealm<unknown>("(i) => new Error('e' + i)"),
+      fromRealm<unknown>("(i) => new Uint8Array([i, i >> 8]).buffer"),
+      fromRealm<unknown>("(i) => new DataView(new Uint8Array([i, i >> 8]).buffer)"),
+      fromRealm<unknown>("(i) => new Number(i)"),
+    ];
+    for (const make of makers) {
+      expectDistinctKeys(range(200).map(make));
+      expectFastEqualsClasses(range(100).map((i) => make(i % 10)));
+    }
+    // fast-equals ignores enumerable own keys on these too.
+    const tagged = fromRealm<unknown>("(i) => Object.assign(new Map([['k', 1]]), i ? { tag: i } : {})");
+    expect(new MapSet([tagged(0), tagged(1)]).size).toBe(1);
+  });
+
+  it("gives each object that fast-equals compares by reference its own key", () => {
+    class Thenable {
+      then(): void {}
+    }
+    const makers: ((i: number) => object)[] = [
+      (i) => new URLSearchParams(`q=${i}`),
+      (i) => new Blob([String(i)]),
+      () => new WeakMap(),
+      () => Promise.resolve(1),
+      () => new Thenable(),
+    ];
+    for (const make of makers) {
+      const values = range(300).map(make);
+      expectDistinctKeys(values);
+      const set = new MapSet(values);
+      expect(values.every((value) => set.has(value))).toBe(true);
+      expect(set.has(make(0))).toBe(false);
+    }
+  });
+
+  it("agrees with fast-equals on objects that only borrow a built-in's tag", () => {
+    // One class per tag. fast-equals tells objects of different classes apart before it reads the
+    // tag, so a class per object would never reach the tagged comparison under test. Date is left
+    // out because fast-equals throws on a look-alike, which has no getTime().
+    const tags = ["Map", "Set", "RegExp", "URL", "Number", "Error", "DataView", "Uint8Array", "Array"];
+    for (const tag of tags) {
+      class LookAlike {
+        get [Symbol.toStringTag]() {
+          return tag;
+        }
+      }
+      const make = (extra: object = {}) => Object.assign(new LookAlike(), extra);
+      const values = [make(), make(), make({ source: "a", flags: "" })];
+      // fast-equals compares boxed primitives by valueOf(), which for a look-alike is itself.
+      expect(deepEqual(values[0], values[1]), tag).toBe(tag !== "Number");
+      expectFastEqualsClasses(values);
+    }
+  });
+
+  it("gives URL look-alikes with the same href one key, whatever else they hold", () => {
+    class LookAlike {
+      get [Symbol.toStringTag]() {
+        return "URL";
+      }
+    }
+    const make = (query: string) =>
+      Object.assign(new LookAlike(), { href: "same", searchParams: new URLSearchParams(query) });
+    const [a, b] = [make("x=1"), make("x=2")];
+    expect(deepEqual(a, b)).toBe(true);
+    expect(structuralHash(a)).toBe(structuralHash(b));
+    expect(new MapSet([a, b]).size).toBe(1);
+    expect(new MapSet([a]).has(b)).toBe(true);
+  });
+});
+
+describe("out-of-bounds and detached DataViews", () => {
+  // A view on a resizable buffer that then shrinks below it, which makes its getters throw.
+  const outOfBounds = (offset: number) => {
+    const buffer = new (ArrayBuffer as unknown as new (n: number, o: object) => ArrayBuffer & {
+      resize(n: number): void;
+    })(16, { maxByteLength: 64 });
+    const view = new DataView(buffer, offset);
+    buffer.resize(0);
+    return view;
+  };
+  const detached = () => {
+    const buffer = new ArrayBuffer(4);
+    const view = new DataView(buffer);
+    structuredClone(buffer, { transfer: [buffer] });
+    return view;
+  };
+
+  it("reads them as the empty view at offset 0, as out-of-bounds typed arrays report", () => {
+    expect(() => outOfBounds(8).byteOffset).toThrow(TypeError);
+    const set = new MapSet<unknown>([outOfBounds(8), outOfBounds(4), detached()]);
+    expect(set.size).toBe(1);
+    expect(set.has(new DataView(new ArrayBuffer(0)))).toBe(true);
+    expect(set.has(new DataView(new ArrayBuffer(4), 4))).toBe(false); // empty, but at offset 4
+    expect(set.has(new DataView(new ArrayBuffer(1)))).toBe(false);
+    expect(new MapSet([{ view: outOfBounds(8) }, { view: detached() }]).size).toBe(1);
+    expect(set.delete(detached())).toBe(true);
+    expect(set.size).toBe(0);
+  });
+
+  it("does not throw in the duplicate probe", () => {
+    // The second add() matches the first, so the third is checked with shallowEqual first.
+    expect(new MapSet([outOfBounds(8), outOfBounds(8), outOfBounds(8), new DataView(new ArrayBuffer(2))]).size).toBe(2);
+  });
+});
+
+// The depth-limited path for values nested past MAX_DEPTH (README.md, "Circular references").
+describe("MapSet with circular and deeply nested values", () => {
+  const selfRef = <T extends object>(make: (self: T) => void, value: T): T => {
+    make(value);
+    return value;
+  };
+
+  it("deduplicates self-referencing objects, arrays, Maps, Sets and Error causes", () => {
+    const makeAll = () => [
+      selfRef((o: any) => (o.self = o), { a: 1 } as any),
+      selfRef((a: any[]) => a.push(a), [1] as any[]),
+      selfRef((m: Map<any, any>) => m.set("self", m), new Map()),
+      selfRef((s: Set<any>) => s.add(s), new Set()),
+      selfRef((e: any) => (e.cause = e), new Error("x")),
+    ];
+    const first = makeAll();
+    // fast-equals compares error stacks, so the copy reuses each error.
+    const second = makeAll().map((v, i) => (v instanceof Error ? first[i] : v));
+    const set = new MapSet<unknown>([...first, ...second]);
+    expect(set.size).toBe(first.length);
+    for (const v of second) expect(set.has(v)).toBe(true);
+    for (const v of second) expect(set.delete(v)).toBe(true);
+    expect(set.size).toBe(0);
+  });
+
+  it("tells circular values apart by a leaf above the cut-off", () => {
+    const make = (n: number) => selfRef((o: any) => (o.self = o), { n } as any);
+    const set = new MapSet<unknown>([make(1), make(2), make(1)]);
+    expect(set.size).toBe(2);
+    expect(set.has(make(3))).toBe(false);
+  });
+
+  it("tells circular values apart by a leaf below the cut-off, sharing a key", () => {
+    const make = (n: number) => {
+      const root: any = { a: { b: { c: { d: { n } } } } };
+      root.a.b.c.d.root = root;
+      return root;
+    };
+    expect(structuralHash(make(1))).toBe(structuralHash(make(2)));
+    const set = new MapSet<unknown>([make(1), make(2), make(1)]);
+    expect(set.size).toBe(2);
+  });
+
+  // A hash that cut a cycle where it closes would give the equal pair different keys.
+  it("follows fast-equals on cycles that close at different depths", () => {
+    const a: any = {};
+    a.self = a;
+    const b: any = {};
+    b.self = b;
+    expect(new MapSet<unknown>([a, { self: b }]).size).toBe(1);
+
+    const x: any[] = [];
+    x.push(x);
+    const y: any[] = [];
+    y.push([y]);
+    expect(new MapSet<unknown>([x, y]).size).toBe(2);
+  });
+
+  // fast-equals 6.1.1's circularDeepEqual overflows the stack here; MapSet restores the pairing
+  // it overwrites. Drop this note, not the test, once fast-equals fixes it.
+  it("compares Sets that hold themselves and each other in different orders", () => {
+    const make = (reversed: boolean) => {
+      const s = new Set<unknown>();
+      const t = new Set<unknown>([s]);
+      for (const item of reversed ? [t, s] : [s, t]) s.add(item);
+      return s;
+    };
+    const set = new MapSet<unknown>([make(false), make(true)]);
+    expect(set.size).toBe(1);
+    expect(set.has(make(true))).toBe(true);
+  });
+
+  it("keeps a circular value apart from an acyclic one of the same shape", () => {
+    const circular: any = { a: { b: { c: {} } } };
+    circular.a.b.c.self = circular;
+    const acyclic = { a: { b: { c: { self: { a: 1 } } } } };
+    const set = new MapSet<unknown>([circular, acyclic]);
+    expect(set.size).toBe(2);
+    expect(set.has(acyclic)).toBe(true);
+    expect(set.has({ a: { b: { c: { self: { a: 2 } } } } })).toBe(false);
+  });
+
+  it("deduplicates acyclic values nested past the depth limit", () => {
+    const deep = (leaf: number) => {
+      let node: unknown = { leaf };
+      for (let i = 0; i < 1_000; i++) node = { d: node };
+      return node;
+    };
+    const set = new MapSet<unknown>([deep(1), deep(2), deep(1)]);
+    expect(set.size).toBe(2);
+    expect(set.has(deep(2))).toBe(true);
+  });
+});
+
+// A getter runs user code in the middle of hashing, and that code may hash too.
+describe("hashing re-entered from a getter", () => {
+  it("keeps circular comparison when a getter hashes another value", () => {
+    const make = () => {
+      const value: any = {
+        get n() {
+          return structuralHash(0);
+        },
+      };
+      value.self = value;
+      return value;
+    };
+    const set = new MapSet<unknown>([make()]);
+    expect(set.has(make())).toBe(true);
+    expect(set.delete(make())).toBe(true);
+  });
+
+  it("gives a lookup made from a getter its own depth limit", () => {
+    const value = { a: { b: { c: { d: 1 } } } };
+    const inner = new MapSet([value]);
+    const seen: boolean[] = [];
+    const outer: any = {
+      get n() {
+        seen.push(inner.has(value));
+        return 0;
+      },
+    };
+    outer.self = outer; // past MAX_DEPTH, so hashed again with the CUT_DEPTH limit
+    structuralHash(outer);
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.every(Boolean)).toBe(true);
+  });
+});
+
+// After a duplicate, add() checks the next value against the stored value it matched with
+// shallowEqual before hashing.
+describe("MapSet duplicate probe", () => {
+  it("skips a shallow copy of the value it last matched", () => {
+    const shared = { nested: [1, 2, 3] };
+    const set = new MapSet<unknown>([{ ...shared }, { ...shared }, { ...shared }]);
+    expect(set.size).toBe(1);
+  });
+
+  it("falls through to the hash when the shallow check fails", () => {
+    const set = new MapSet<unknown>([{ a: [1] }, { a: [1] }, { a: [2] }, { a: [1] }]);
+    expect(set.size).toBe(2);
+  });
+
+  it("forgets the matched value once it is deleted", () => {
+    const shared = { nested: [1] };
+    const set = new MapSet<unknown>([{ ...shared }, { ...shared }]);
+    expect(set.delete({ nested: [1] })).toBe(true);
+    set.add({ ...shared });
+    expect(set.size).toBe(1);
+    set.clear();
+    set.add({ ...shared });
+    expect(set.size).toBe(1);
+  });
+
+  it("matches a stored undefined", () => {
+    const set = new MapSet<unknown>([undefined, undefined, undefined]);
+    expect(set.size).toBe(1);
+  });
+});

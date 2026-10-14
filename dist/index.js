@@ -18,18 +18,93 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // index.ts
-var unique_set_exports = {};
-__export(unique_set_exports, {
+var index_exports = {};
+__export(index_exports, {
   MapSet: () => MapSet,
   UniqueSet: () => MapSet,
   structuralHash: () => structuralHash
 });
-module.exports = __toCommonJS(unique_set_exports);
+module.exports = __toCommonJS(index_exports);
 var import_fast_equals = require("fast-equals");
 var _f64 = new Float64Array(1);
 var _u8 = new Uint8Array(_f64.buffer);
 var structuralHash = (value) => {
-  return _shash(value, 2166136261) >>> 0;
+  return _hashRoot(value) >>> 0;
+};
+var MAX_DEPTH = 256;
+var CUT_DEPTH = 3;
+var _pairing = (areItemsEqual) => (a, b, state) => {
+  const cache = state.cache;
+  const cachedA = cache.get(a);
+  const cachedB = cache.get(b);
+  if (cachedA && cachedB) return cachedA === b && cachedB === a;
+  cache.set(a, b);
+  cache.set(b, a);
+  const result = areItemsEqual(a, b, state);
+  if (cachedA) cache.set(a, cachedA);
+  else cache.delete(a);
+  if (cachedB) cache.set(b, cachedB);
+  else cache.delete(b);
+  return result;
+};
+var _viewBytes = (view) => {
+  try {
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  } catch {
+    return new Uint8Array(0);
+  }
+};
+var _areDataViewsEqual = (a, b) => {
+  const x = _viewBytes(a);
+  const y = _viewBytes(b);
+  if (x.length !== y.length || x.byteOffset !== y.byteOffset) return false;
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+};
+var _deepEqual = (0, import_fast_equals.createCustomEqual)({
+  createCustomConfig: () => ({ areDataViewsEqual: _areDataViewsEqual })
+});
+var _shallowEqual = (0, import_fast_equals.createCustomEqual)({
+  createInternalComparator: () => Object.is,
+  createCustomConfig: () => ({ areDataViewsEqual: _areDataViewsEqual })
+});
+var _circularEqual = (0, import_fast_equals.createCustomEqual)({
+  createState: () => ({ cache: /* @__PURE__ */ new WeakMap(), meta: void 0 }),
+  createCustomConfig: (config) => ({
+    areDataViewsEqual: _areDataViewsEqual,
+    areArraysEqual: _pairing(config.areArraysEqual),
+    areErrorsEqual: _pairing(config.areErrorsEqual),
+    areMapsEqual: _pairing(config.areMapsEqual),
+    areObjectsEqual: _pairing(config.areObjectsEqual),
+    areSetsEqual: _pairing(config.areSetsEqual)
+  })
+});
+var _tooDeep = new Error("unique-set: value nested past MAX_DEPTH");
+var _limit = MAX_DEPTH;
+var _deep = false;
+var _hashRoot = (value) => {
+  const outer = _limit;
+  _limit = MAX_DEPTH;
+  try {
+    const hash = _shash(value, 2166136261, 0);
+    _limit = outer;
+    _deep = false;
+    return hash;
+  } catch (error) {
+    _limit = outer;
+    if (error !== _tooDeep) throw error;
+  }
+  return _hashCut(value, outer);
+};
+var _hashCut = (value, outer) => {
+  _limit = CUT_DEPTH;
+  try {
+    const hash = _shash(value, 2166136261, 0);
+    _deep = true;
+    return hash;
+  } finally {
+    _limit = outer;
+  }
 };
 var _mix = (hash, byte) => {
   return Math.imul(hash ^ byte, 16777619);
@@ -40,7 +115,155 @@ var _mixStr = (hash, str) => {
   }
   return hash;
 };
-var _shash = (value, hash) => {
+var _mixBytes = (hash, bytes) => {
+  for (let i = 0; i < bytes.length; i++) hash = _mix(hash, bytes[i]);
+  return hash;
+};
+var _toString = Object.prototype.toString;
+var _mapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size").get;
+var _setSize = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
+var _getTime = Date.prototype.getTime;
+var _typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Int8Array.prototype),
+  Symbol.toStringTag
+).get;
+var _isBrand = (method, value) => {
+  try {
+    method.call(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+var _ids = /* @__PURE__ */ new WeakMap();
+var _nextId = 0;
+var _shashIdentity = (value, hash) => {
+  let id = _ids.get(value);
+  if (id === void 0) _ids.set(value, id = _nextId++);
+  return _mix(_mix(hash, 28), id);
+};
+var _shashKeys = (value, hash, depth) => {
+  const keys = Object.keys(value);
+  hash = _mix(hash, 19);
+  let objHash = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (key.charCodeAt(0) === 95 && // "_"
+    (key === "_owner" || key === "__o" || key === "__v") && value.$$typeof) {
+      continue;
+    }
+    let pairHash = _mixStr(2166136261, key);
+    pairHash = _shash(value[key], pairHash, depth);
+    objHash = objHash + pairHash | 0;
+  }
+  return _mix(hash, objHash);
+};
+var _shashMap = (value, hash, depth) => {
+  let mapHash = 0;
+  for (const [k, v] of value) {
+    let entryHash = _shash(k, 2166136261, depth);
+    entryHash = _shash(v, entryHash, depth);
+    mapHash = mapHash + entryHash | 0;
+  }
+  return _mix(hash, mapHash);
+};
+var _shashSet = (value, hash, depth) => {
+  let setHash = 0;
+  for (const v of value) {
+    setHash = setHash + _shash(v, 2166136261, depth) | 0;
+  }
+  return _mix(hash, setHash);
+};
+var _shashDate = (value, hash) => {
+  hash = _mix(hash, 20);
+  const time = value.getTime();
+  if (time !== time) return _mix(hash, 4);
+  _f64[0] = time;
+  for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]);
+  return hash;
+};
+var _shashDataView = (value, hash) => _mixBytes(_mix(hash, 24), _viewBytes(value));
+var _shashView = (value, hash, depth) => {
+  if (_typedArrayTag.call(value) === void 0) return _shashDataView(value, hash);
+  hash = _mix(hash, 22);
+  const items = value;
+  for (let i = 0; i < items.length; i++) hash = _shash(items[i], hash, depth);
+  return hash;
+};
+var _shashTagged = (value, hash, depth) => {
+  const tag = _toString.call(value);
+  switch (tag) {
+    case "[object Object]":
+      return typeof value.then === "function" ? _shashIdentity(value, hash) : _shashKeys(value, hash, depth);
+    case "[object Arguments]":
+      return _shashKeys(value, hash, depth);
+    case "[object Error]": {
+      const error = value;
+      hash = _shash(error.name, _mix(hash, 25), depth);
+      hash = _shash(error.message, hash, depth);
+      hash = _shash(error.cause, hash, depth);
+      return _shashKeys(value, hash, depth);
+    }
+    case "[object Map]":
+      return _isBrand(_mapSize, value) ? _shashMap(value, hash, depth) : _mix(hash, 29);
+    case "[object Set]":
+      return _isBrand(_setSize, value) ? _shashSet(value, hash, depth) : _mix(hash, 30);
+    case "[object Date]":
+      return _isBrand(_getTime, value) ? _shashDate(value, hash) : _mix(hash, 20);
+    case "[object RegExp]": {
+      const regExp = value;
+      return _shash(regExp.flags, _shash(regExp.source, _mix(hash, 21), depth), depth);
+    }
+    case "[object Number]":
+    case "[object String]":
+    case "[object Boolean]":
+    case "[object BigInt]": {
+      const valueOf = value.valueOf;
+      const primitive = typeof valueOf === "function" ? valueOf.call(value) : value;
+      return typeof primitive === "object" || typeof primitive === "function" ? _mix(hash, 27) : _shash(primitive, _mix(hash, 27), depth);
+    }
+    case "[object URL]":
+      return _shashUrl(value, hash, depth);
+    case "[object ArrayBuffer]":
+      return _mixBytes(_mix(hash, 23), new Uint8Array(value));
+    case "[object DataView]":
+      return _shashDataView(value, hash);
+    // Real arrays and typed arrays never get here, so these only borrow the tag.
+    case "[object Array]":
+    case "[object Int8Array]":
+    case "[object Uint8Array]":
+    case "[object Uint8ClampedArray]":
+    case "[object Int16Array]":
+    case "[object Uint16Array]":
+    case "[object Int32Array]":
+    case "[object Uint32Array]":
+    case "[object Float16Array]":
+    case "[object Float32Array]":
+    case "[object Float64Array]":
+    case "[object BigInt64Array]":
+    case "[object BigUint64Array]":
+      return _mix(hash, 31);
+    default:
+      return _shashIdentity(value, hash);
+  }
+};
+var _urlHref = typeof URL === "function" ? Object.getOwnPropertyDescriptor(URL.prototype, "href")?.get : void 0;
+var _shashUrl = (value, hash, depth) => {
+  if (!_urlHref || !_isBrand(_urlHref, value)) return _mix(hash, 26);
+  const searchParams = value.searchParams.toString();
+  hash = _shash(value.protocol, _mix(hash, 26), depth);
+  hash = _shash(value.username, hash, depth);
+  hash = _shash(value.password, hash, depth);
+  hash = _shash(value.host, hash, depth);
+  hash = _shash(value.pathname, hash, depth);
+  hash = _shash(value.hash, hash, depth);
+  let paramsHash = 0;
+  for (const pair of searchParams.split("&")) {
+    paramsHash = paramsHash + _mixStr(2166136261, pair) | 0;
+  }
+  return _mix(hash, paramsHash);
+};
+var _shash = (value, hash, depth) => {
   if (value === null) return _mix(hash, 0);
   if (value === void 0) return _mix(hash, 1);
   switch (typeof value) {
@@ -66,98 +289,208 @@ var _shash = (value, hash) => {
     default:
       break;
   }
+  if (++depth > _limit) {
+    if (_limit === MAX_DEPTH) throw _tooDeep;
+    return _mix(hash, 63);
+  }
   if (Array.isArray(value)) {
     hash = _mix(hash, 16);
-    for (let i = 0; i < value.length; i++) hash = _shash(value[i], hash);
+    for (let i = 0; i < value.length; i++) hash = _shash(value[i], hash, depth);
     return hash;
   }
-  if (value instanceof Map) {
-    let mapHash = 0;
-    for (const [k, v] of value) {
-      let entryHash = _shash(k, 2166136261);
-      entryHash = _shash(v, entryHash);
-      mapHash = mapHash + entryHash | 0;
-    }
-    return _mix(hash, mapHash);
-  }
-  if (value instanceof Set) {
-    let setHash = 0;
-    for (const v of value) {
-      setHash = setHash + _shash(v, 2166136261) | 0;
-    }
-    return _mix(hash, setHash);
-  }
-  if (value instanceof Date) {
-    hash = _mix(hash, 20);
-    _f64[0] = value.getTime();
-    for (let i = 0; i < 8; i++) hash = _mix(hash, _u8[i]);
-    return hash;
-  }
-  if (value instanceof RegExp) {
-    hash = _mix(hash, 21);
-    return _mixStr(hash, value.toString());
-  }
-  hash = _mix(hash, 19);
-  let objHash = 0;
-  const keys = Object.keys(value);
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
-    let pairHash = _mixStr(2166136261, key);
-    pairHash = _shash(value[key], pairHash);
-    objHash = objHash + pairHash | 0;
-  }
-  return _mix(hash, objHash);
+  const constructor = value.constructor;
+  if (constructor === Object || constructor == null) return _shashKeys(value, hash, depth);
+  if (value instanceof Map) return _shashMap(value, hash, depth);
+  if (value instanceof Set) return _shashSet(value, hash, depth);
+  if (value instanceof Date) return _shashDate(value, hash);
+  if (value instanceof RegExp) return _mixStr(_mix(hash, 21), value.toString());
+  if (ArrayBuffer.isView(value)) return _shashView(value, hash, depth);
+  return _shashTagged(value, hash, depth);
 };
-var MapSet = class {
+var _key = (value) => _hashRoot(value) | 0;
+var _NONE = /* @__PURE__ */ Symbol("none");
+var Box = class {
+  value;
+  key;
+  /** On the entry at `key`: the boxes at `key` that hold a value, in insertion order. */
+  group;
+  constructor(value, key) {
+    this.value = value;
+    this.key = key;
+  }
+};
+var _find = (map, key, value, equal) => {
+  const slot = map.get(key);
+  if (slot instanceof Box) {
+    for (const box of slot.group) {
+      if (equal(value, box.value)) return box.value;
+    }
+    return _NONE;
+  }
+  if (slot === void 0) return value === void 0 && map.has(key) ? slot : _NONE;
+  return equal(value, slot) ? slot : _NONE;
+};
+var _insert = (map, key, value) => {
+  let head = map.get(key);
+  if (head === void 0 && !map.has(key)) {
+    map.set(key, value);
+    return;
+  }
+  if (!(head instanceof Box)) {
+    head = new Box(head, key);
+    head.group = [head];
+    map.set(key, head);
+  }
+  const box = new Box(value, key);
+  head.group.push(box);
+  map.set(box, box);
+};
+var _unbox = (map, head, i) => {
+  const group = head.group;
+  const box = group[i];
+  group.splice(i, 1);
+  box.value = _NONE;
+  if (box !== head) map.delete(box);
+  if (group.length === 0) map.delete(head.key);
+  else if (group[0] === head && group.length === 1) map.set(head.key, head.value);
+};
+var _remove = (map, key, item) => {
+  const slot = map.get(key);
+  if (slot instanceof Box) {
+    const group = slot.group;
+    for (let i = 0; i < group.length; i++) {
+      if (Object.is(group[i].value, item)) {
+        _unbox(map, slot, i);
+        return true;
+      }
+    }
+    return false;
+  }
+  if (!Object.is(slot, item) || slot === void 0 && !map.has(key)) return false;
+  map.delete(key);
+  return true;
+};
+var _holds = (map, key, item) => {
+  const slot = map.get(key);
+  if (slot instanceof Box) return slot.group.some((box) => Object.is(box.value, item));
+  return Object.is(slot, item) && (slot !== void 0 || map.has(key));
+};
+var _each = (map, fn) => {
+  map.forEach((slot, key) => {
+    if (!(slot instanceof Box)) fn(slot, key);
+    else if (slot.value !== _NONE) fn(slot.value, slot.key);
+  });
+};
+var _setRecord = (other) => {
+  if (other === null || typeof other !== "object" && typeof other !== "function") {
+    throw new TypeError("MapSet: the argument must be a set-like object");
+  }
+  const size = +other.size;
+  if (size !== size) throw new TypeError("MapSet: the argument's size must be a number");
+  const intSize = Math.trunc(size);
+  if (intSize < 0) throw new RangeError("MapSet: the argument's size must not be negative");
+  const has = other.has;
+  if (typeof has !== "function") throw new TypeError("MapSet: the argument's has must be a function");
+  const keys = other.keys;
+  if (typeof keys !== "function") throw new TypeError("MapSet: the argument's keys must be a function");
+  return { set: other, size: intSize, has, keys };
+};
+var _setHas = Set.prototype.has;
+var _setKeys = Set.prototype.keys;
+var _setForEach = Set.prototype.forEach;
+var _isPlainSet = (rec) => rec.has === _setHas && rec.keys === _setKeys && _isBrand(_setSize, rec.set) && Object.getPrototypeOf(rec.set) === Set.prototype;
+var _keysOf = (rec) => {
+  const iterator = rec.keys.call(rec.set);
+  if (iterator === null || typeof iterator !== "object" && typeof iterator !== "function") {
+    throw new TypeError("MapSet: the argument's keys() must return an object");
+  }
+  const next = iterator.next;
+  const steps = {
+    next: () => next.call(iterator),
+    return: () => {
+      const close = iterator.return;
+      return close == null ? { done: true, value: void 0 } : close.call(iterator);
+    }
+  };
+  return { [Symbol.iterator]: () => steps };
+};
+var MapSet = class _MapSet {
   #map;
   #size;
-  constructor(iterable = []) {
+  // The stored value the last `add()` matched, while `#probing`, for the duplicate probe
+  // (PERF.md, Notes).
+  #last = void 0;
+  #probing = false;
+  constructor(iterable) {
+    this.#map = /* @__PURE__ */ new Map();
+    this.#size = 0;
+    if (iterable == null) return;
     if (!Array.isArray(iterable) && !iterable[Symbol.iterator]) {
       throw new TypeError("MapSet requires an iterable");
     }
-    this.#map = /* @__PURE__ */ new Map();
-    this.#size = 0;
     for (const item of iterable) {
       this.add(item);
     }
   }
   add(value) {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) {
-      this.#map.set(hash, [value]);
-      this.#size++;
+    if (this.#probing && _shallowEqual(value, this.#last)) return this;
+    const key = _key(value);
+    const equal = _deep ? _circularEqual : _deepEqual;
+    const map = this.#map;
+    const slot = map.get(key);
+    if (slot === void 0 && !map.has(key)) {
+      map.set(key, value);
     } else {
-      for (const item of bucket) {
-        if ((0, import_fast_equals.deepEqual)(value, item)) return this;
+      if (slot instanceof Box) {
+        for (const box of slot.group) {
+          if (equal(value, box.value)) return this.#matched(box.value);
+        }
+      } else if (equal(value, slot)) {
+        return this.#matched(slot);
       }
-      bucket.push(value);
-      this.#size++;
+      _insert(map, key, value);
     }
+    this.#size++;
+    this.#probing = false;
+    return this;
+  }
+  #matched(item) {
+    this.#last = item;
+    this.#probing = true;
     return this;
   }
   has(value) {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) return false;
-    for (const item of bucket) {
-      if ((0, import_fast_equals.deepEqual)(value, item)) return true;
-    }
-    return false;
+    return this.#find(value) !== _NONE;
+  }
+  /** The stored value equal to `value`, or `_NONE`. */
+  #find(value) {
+    const key = _key(value);
+    return _find(this.#map, key, value, _deep ? _circularEqual : _deepEqual);
   }
   delete(value) {
-    const hash = structuralHash(value);
-    const bucket = this.#map.get(hash);
-    if (!bucket) return false;
-    for (let i = 0; i < bucket.length; i++) {
-      if ((0, import_fast_equals.deepEqual)(value, bucket[i])) {
-        bucket.splice(i, 1);
-        if (bucket.length === 0) this.#map.delete(hash);
-        this.#size--;
-        return true;
+    this.#last = void 0;
+    this.#probing = false;
+    const key = _key(value);
+    const equal = _deep ? _circularEqual : _deepEqual;
+    const map = this.#map;
+    const slot = map.get(key);
+    if (slot instanceof Box) {
+      const group = slot.group;
+      for (let i = 0; i < group.length; i++) {
+        if (equal(value, group[i].value)) {
+          _unbox(map, slot, i);
+          this.#size--;
+          return true;
+        }
       }
+      return false;
     }
-    return false;
+    if (slot === void 0 ? value !== void 0 || !map.has(key) : !equal(value, slot)) {
+      return false;
+    }
+    map.delete(key);
+    this.#size--;
+    return true;
   }
   get size() {
     return this.#size;
@@ -165,21 +498,191 @@ var MapSet = class {
   clear() {
     this.#map.clear();
     this.#size = 0;
+    this.#last = void 0;
+    this.#probing = false;
   }
   forEach(callback, thisArg) {
-    for (const bucket of this.#map.values()) {
-      for (const value of bucket) {
-        callback.call(thisArg, value, value, this);
-      }
+    if (typeof callback !== "function") throw new TypeError("MapSet: forEach requires a function");
+    for (const slot of this.#map.values()) {
+      if (!(slot instanceof Box)) callback.call(thisArg, slot, slot, this);
+      else if (slot.value !== _NONE) callback.call(thisArg, slot.value, slot.value, this);
     }
   }
   *values() {
-    for (const bucket of this.#map.values()) {
-      yield* bucket;
+    for (const slot of this.#map.values()) {
+      if (!(slot instanceof Box)) yield slot;
+      else if (slot.value !== _NONE) yield slot.value;
     }
   }
-  *[Symbol.iterator]() {
-    yield* this.values();
+  /** The same as `values()`, as on `Set`. */
+  keys() {
+    return this.values();
+  }
+  /** Yields `[value, value]` for each value, as on `Set`. */
+  *entries() {
+    for (const value of this.values()) yield [value, value];
+  }
+  [Symbol.iterator]() {
+    return this.values();
+  }
+  get [Symbol.toStringTag]() {
+    return "MapSet";
+  }
+  // Set algebra, following the ES2025 `Set` methods step for step: `other` is read through
+  // `_setRecord`, the smaller side drives the loop where the spec says so, and every result is a
+  // new `MapSet`. Values from this set keep their map key, so they are never hashed again.
+  // `other.has()` brings its own equality (README.md, "Differences from native `Set`"), and may
+  // change this set while a loop runs over it, so each loop reads the data the spec reads: this
+  // set live where the spec does, and the result's copy of it in `difference()`. A plain `Set`
+  // (`_isPlainSet`) is the exception: its `has()` compares by reference, so its values are
+  // compared by deep equality instead, through `#inPlainSet()` or this set's own lookups.
+  /**
+   * Deep membership in the plain `Set` `other`, for values of this set. A reference hit settles
+   * it without hashing. The first object that misses hashes each object in `other`, once per
+   * call, to find every value of this set that one of them equals.
+   */
+  #inPlainSet(other) {
+    let found;
+    return (item) => {
+      if (_setHas.call(other, item)) return true;
+      if (item === null || typeof item !== "object") return false;
+      if (found === void 0) {
+        found = /* @__PURE__ */ new Set();
+        _setForEach.call(other, (value) => {
+          if (value === null || typeof value !== "object") return;
+          const match = this.#find(value);
+          if (match !== _NONE) found.add(match);
+        });
+      }
+      return found.has(item);
+    };
+  }
+  /** A copy sharing no boxes with this set, so either can change without affecting the other. */
+  #copy() {
+    const copy = new _MapSet();
+    const map = copy.#map;
+    this.#map.forEach((slot, key) => {
+      if (!(slot instanceof Box)) map.set(key, slot);
+      else if (slot.value !== _NONE) _insert(map, slot.key, slot.value);
+    });
+    copy.#size = this.#size;
+    return copy;
+  }
+  /** A new set with the values of this set, then those of `other` that it lacks. */
+  union(other) {
+    const rec = _setRecord(other);
+    const keys = _keysOf(rec);
+    const result = this.#copy();
+    for (const value of keys) result.add(value);
+    return result;
+  }
+  /** A new set with the values of this set that `other` also has. */
+  intersection(other) {
+    const rec = _setRecord(other);
+    const result = new _MapSet();
+    const map = result.#map;
+    if (this.#size <= rec.size) {
+      const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set) : void 0;
+      _each(this.#map, (item, key) => {
+        if ((inSet ? inSet(item) : rec.has.call(rec.set, item)) && !_holds(map, key, item)) {
+          _insert(map, key, item);
+          result.#size++;
+        }
+      });
+    } else {
+      for (const value of _keysOf(rec)) {
+        const key = _key(value);
+        const item = _find(this.#map, key, value, _deep ? _circularEqual : _deepEqual);
+        if (item !== _NONE && !_holds(map, key, item)) {
+          _insert(map, key, item);
+          result.#size++;
+        }
+      }
+    }
+    return result;
+  }
+  /** A new set with the values of this set that `other` does not have. */
+  difference(other) {
+    const rec = _setRecord(other);
+    const result = this.#copy();
+    const map = result.#map;
+    if (this.#size <= rec.size) {
+      const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set) : void 0;
+      _each(map, (item, key) => {
+        if ((inSet ? inSet(item) : rec.has.call(rec.set, item)) && _remove(map, key, item)) {
+          result.#size--;
+        }
+      });
+    } else {
+      for (const value of _keysOf(rec)) {
+        const key = _key(value);
+        const item = _find(map, key, value, _deep ? _circularEqual : _deepEqual);
+        if (item !== _NONE) {
+          _remove(map, key, item);
+          result.#size--;
+        }
+      }
+    }
+    return result;
+  }
+  /** A new set with the values in exactly one of this set and `other`. */
+  symmetricDifference(other) {
+    const rec = _setRecord(other);
+    const keys = _keysOf(rec);
+    const result = this.#copy();
+    const map = result.#map;
+    for (const value of keys) {
+      const key = _key(value);
+      const equal = _deep ? _circularEqual : _deepEqual;
+      const inResult = _find(map, key, value, equal);
+      if (_find(this.#map, key, value, equal) !== _NONE) {
+        if (inResult !== _NONE) {
+          _remove(map, key, inResult);
+          result.#size--;
+        }
+      } else if (inResult === _NONE) {
+        _insert(map, key, value);
+        result.#size++;
+      }
+    }
+    return result;
+  }
+  /** Whether `other` has every value of this set. */
+  isSubsetOf(other) {
+    const rec = _setRecord(other);
+    if (this.#size > rec.size) return false;
+    const inSet = _isPlainSet(rec) ? this.#inPlainSet(rec.set) : void 0;
+    for (const item of this.values()) {
+      if (!(inSet ? inSet(item) : rec.has.call(rec.set, item))) return false;
+    }
+    return true;
+  }
+  /** Whether this set has every value of `other`. */
+  isSupersetOf(other) {
+    const rec = _setRecord(other);
+    if (this.#size < rec.size && !_isPlainSet(rec)) return false;
+    for (const value of _keysOf(rec)) {
+      if (this.#find(value) === _NONE) return false;
+    }
+    return true;
+  }
+  /** Whether this set and `other` have no value in common. */
+  isDisjointFrom(other) {
+    const rec = _setRecord(other);
+    let deep = this.#size > rec.size;
+    if (!deep) {
+      const plain = _isPlainSet(rec);
+      for (const item of this.values()) {
+        if (rec.has.call(rec.set, item)) return false;
+        if (plain && item !== null && typeof item === "object") deep = true;
+      }
+    }
+    if (deep) {
+      for (const value of _keysOf(rec)) {
+        if (this.#find(value) !== _NONE) return false;
+      }
+    }
+    return true;
   }
 };
 // Annotate the CommonJS export names for ESM import in node:
